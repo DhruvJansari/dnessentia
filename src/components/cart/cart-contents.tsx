@@ -5,6 +5,7 @@ import Link from "next/link";
 import { site } from "@/data/site";
 import { formatPrice, whatsappLink } from "@/lib/format";
 import { ArrowIcon, MinusIcon, PlusIcon, WhatsAppIcon } from "../icons";
+import { useStore } from "../store-context";
 import { useCart, type CartItem } from "./cart-context";
 
 function orderMessage(items: CartItem[], subtotal: number) {
@@ -137,6 +138,43 @@ export function EmptyCart({ onNavigate }: { onNavigate?: () => void }) {
       <Link href="/attar" onClick={onNavigate} className="btn btn-dark mt-7">
         Shop Attars
       </Link>
+    </div>
+  );
+}
+
+/** "Complete the ritual" upsell: one-tap 1 ml samples of attars that aren't in the bag yet. */
+export function CartSuggestions({ limit = 3 }: { limit?: number }) {
+  const { items, add } = useCart();
+  const { products } = useStore();
+  const inBag = new Set(items.map((i) => i.slug));
+  const picks = products.filter((p) => p.type === "attar" && p.quickVariant && !inBag.has(p.slug)).slice(0, limit);
+  if (picks.length === 0) return null;
+  return (
+    <div className="border-t border-line py-5">
+      <p className="text-[12px] font-medium uppercase tracking-[0.04em] text-muted">Add a sample</p>
+      <ul className="mt-3 space-y-3">
+        {picks.map((p) => (
+          <li key={p.slug} className="flex items-center gap-3">
+            <span className="relative size-12 shrink-0 bg-white">
+              <Image src={p.image} alt="" fill sizes="48px" className="object-contain" />
+            </span>
+            <span className="min-w-0 flex-1 text-sm">
+              <span className="block truncate font-medium">{p.name}</span>
+              <span className="text-muted">
+                {p.quickVariant!.label} · {formatPrice(p.quickVariant!.price)}
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => add({ variantId: p.quickVariant!.id, slug: p.slug, name: p.name, image: p.image, variant: p.quickVariant!.label, price: p.quickVariant!.price })}
+              className="grid size-9 shrink-0 place-items-center rounded-full border border-line transition-colors hover:border-ink hover:bg-ink hover:text-ivory"
+              aria-label={`Add ${p.name} ${p.quickVariant!.label}`}
+            >
+              <PlusIcon className="size-4" />
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -29,11 +29,13 @@ export const footerNav = {
   help: [
     { href: "/faq", label: "FAQs" },
     { href: "/shipping-delivery", label: "Shipping & Delivery" },
-    { href: "/refund-returns", label: "Returns & Refunds" },
+    { href: "/refund-returns", label: "Cancellation & Replacement" },
+    { href: "/terms", label: "Terms & Conditions" },
     { href: "/privacy-policy", label: "Privacy Policy" },
   ],
   company: [
     { href: "/about", label: "Our Story" },
+    { href: "/contact", label: "Contact Us" },
     { href: "/account", label: "My Account" },
     { href: "/track", label: "Track Order" },
   ],
@@ -114,7 +116,15 @@ export const faqs: { q: string; a: string | string[] }[] = [
   },
   {
     q: "What if I receive a damaged product?",
-    a: "Our support team is always ready to help with any order-related concern. Simply contact us with your order details and unboxing video for quick assistance.",
+    a: "Request a replacement from your order page within 3 days of delivery, with photos and your unboxing video link. Approved requests get a free replacement of the product.",
+  },
+  {
+    q: "Can I cancel my order?",
+    a: "Yes, within 12 hours of ordering and before dispatch, from your order page. Prepaid orders carry a 50% cancellation charge; the rest is refunded within 5-7 business days.",
+  },
+  {
+    q: "Do you accept returns?",
+    a: "We don't accept returns on delivered products. Damaged, leaked, wrong or missing items are replaced.",
   },
   {
     q: "Are DN Essentia fragrances suitable for gifting?",

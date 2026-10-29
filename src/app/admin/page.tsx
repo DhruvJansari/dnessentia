@@ -9,17 +9,32 @@ import { integrations } from "@/lib/env";
 
 export const metadata = { title: "Dashboard" };
 
-export default function DashboardPage() {
+export default function DashboardPage({ searchParams }: PageProps<"/admin">) {
   return (
     <Suspense fallback={<Skeleton rows={2} />}>
-      <Dashboard />
+      <Dashboard searchParams={searchParams} />
     </Suspense>
   );
 }
 
-async function Dashboard() {
+const ranges = [7, 30, 90] as const;
+
+function Delta({ now, before }: { now: number; before: number }) {
+  if (before === 0) return <span className="text-stone-500">{now > 0 ? "New this period" : "No sales yet"}</span>;
+  const pct = Math.round(((now - before) / before) * 100);
+  const up = pct >= 0;
+  return (
+    <span className={up ? "text-emerald-700" : "text-red-700"}>
+      {up ? "▲" : "▼"} {Math.abs(pct)}% <span className="text-stone-500">vs previous period</span>
+    </span>
+  );
+}
+
+async function Dashboard({ searchParams }: { searchParams: PageProps<"/admin">["searchParams"] }) {
   const user = await requireStaff();
-  const d = await getDashboard();
+  const requested = Number((await searchParams).range);
+  const range = (ranges as readonly number[]).includes(requested) ? (requested as (typeof ranges)[number]) : 30;
+  const d = await getDashboard(range);
   const setup = [
     { ok: integrations.razorpay(), label: "Razorpay keys", hint: "Add RAZORPAY_KEY_ID / SECRET to take online payments" },
     { ok: integrations.smtp(), label: "SMTP email", hint: "Add SMTP_* settings so customers receive emails" },
@@ -59,7 +74,32 @@ async function Dashboard() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <Card title="Revenue, last 30 days" actions={<span className="text-sm text-stone-500">7 days: {inr(d.week.revenue)}</span>}>
+        <Card
+          title={
+            <div>
+              <h2 className="font-sans text-[15px] font-semibold tracking-normal">Revenue</h2>
+              <p className="mt-1 text-[28px] font-semibold leading-none tracking-tight">{inr(d.range.revenue)}</p>
+              <p className="mt-1.5 text-[12px]">
+                {d.range.orders} order{d.range.orders === 1 ? "" : "s"} · <Delta now={d.range.revenue} before={d.range.previous.revenue} />
+              </p>
+            </div>
+          }
+          actions={
+            <nav aria-label="Chart range" className="flex rounded-lg bg-stone-100 p-0.5 text-[13px]">
+              {ranges.map((r) => (
+                <Link
+                  key={r}
+                  href={r === 30 ? "/admin" : `/admin?range=${r}`}
+                  scroll={false}
+                  aria-current={r === range ? "true" : undefined}
+                  className={`rounded-md px-3 py-1 transition-colors ${r === range ? "bg-white font-medium shadow-sm" : "text-stone-500 hover:text-stone-900"}`}
+                >
+                  {r}d
+                </Link>
+              ))}
+            </nav>
+          }
+        >
           <RevenueChart data={d.chart} />
         </Card>
         <Card title="Orders by status">

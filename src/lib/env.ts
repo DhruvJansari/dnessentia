@@ -5,6 +5,7 @@ export const env = {
   appUrl: (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, ""),
   isProd: process.env.NODE_ENV === "production",
   appSecret: process.env.APP_SECRET ?? "",
+  cronSecret: process.env.CRON_SECRET ?? "",
 
   smtp: {
     host: process.env.SMTP_HOST ?? "",
@@ -22,9 +23,15 @@ export const env = {
   },
 
   shiprocket: {
+    // Override only to point at Shiprocket's sandbox while testing.
+    apiUrl: (process.env.SHIPROCKET_API_URL || "https://apiv2.shiprocket.in/v1/external").replace(/\/$/, ""),
     email: process.env.SHIPROCKET_EMAIL ?? "",
     password: process.env.SHIPROCKET_PASSWORD ?? "",
+    // When true, "Create shipment" only creates the order in Shiprocket. It never assigns a courier or books a
+    // pickup (the two steps that charge the wallet), so a live API user can be tested safely.
+    testOnly: process.env.SHIPROCKET_TEST_ONLY === "true",
     pickupLocation: process.env.SHIPROCKET_PICKUP_LOCATION ?? "Primary",
+    pickupPincode: process.env.SHIPROCKET_PICKUP_PINCODE ?? "",
     webhookToken: process.env.SHIPROCKET_WEBHOOK_TOKEN ?? "",
   },
 };

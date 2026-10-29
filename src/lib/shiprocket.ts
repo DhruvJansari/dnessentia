@@ -4,7 +4,7 @@ import { env } from "./env";
 import { getInternal, setInternal } from "./settings";
 import type { StoreSettings } from "./settings-defaults";
 
-const API = "https://apiv2.shiprocket.in/v1/external";
+const API = env.shiprocket.apiUrl;
 const TOKEN_KEY = "internal.shiprocketToken";
 
 type Order = typeof orders.$inferSelect;
@@ -66,6 +66,11 @@ export type ShiprocketCreated = { order_id: number; shipment_id: number; status:
 /** Creates the order in Shiprocket ("adhoc" order). */
 export function createShiprocketOrder(order: Order, items: OrderItem[], fulfilment: StoreSettings["fulfilment"], weightGrams: number) {
   const [first, ...rest] = order.customerName.trim().split(/\s+/);
+  // Free-gift lines travel in the same box but aren't declared separately. Replacements are free re-shipments,
+  // declared at the original item value and never collected as COD.
+  const shipped = items.filter((i) => !i.isGift);
+  const isReplacement = order.kind === "replacement";
+  const declared = shipped.reduce((n, i) => n + i.unitPrice * i.quantity, 0);
   return call<ShiprocketCreated>("/orders/create/adhoc", {
     method: "POST",
     body: JSON.stringify({
@@ -83,7 +88,7 @@ export function createShiprocketOrder(order: Order, items: OrderItem[], fulfilme
       billing_email: order.email,
       billing_phone: order.phone.replace(/\D/g, "").slice(-10),
       shipping_is_billing: true,
-      order_items: items.map((i) => ({
+      order_items: shipped.map((i) => ({
         name: `${i.name} ${i.variantLabel}`,
         sku: i.sku,
         units: i.quantity,
@@ -92,14 +97,14 @@ export function createShiprocketOrder(order: Order, items: OrderItem[], fulfilme
         tax: 0,
         hsn: 3303,
       })),
-      payment_method: order.paymentMethod === "cod" ? "COD" : "Prepaid",
-      shipping_charges: order.shippingFee,
-      total_discount: order.discount,
-      sub_total: order.total - order.shippingFee,
+      payment_method: !isReplacement && order.paymentMethod === "cod" ? "COD" : "Prepaid",
+      shipping_charges: isReplacement ? 0 : order.shippingFee,
+      total_discount: isReplacement ? 0 : order.discount,
+      sub_total: isReplacement ? declared : order.total - order.shippingFee,
       length: fulfilment.packageLengthCm,
       breadth: fulfilment.packageBreadthCm,
       height: fulfilment.packageHeightCm,
-      weight: Math.max(0.1, weightGrams / 1000),
+      weight: parcelWeightKg(weightGrams),
     }),
   });
 }
@@ -110,11 +115,11 @@ type AwbResponse = {
   message?: string;
 };
 
-/** Lets Shiprocket pick the recommended courier and assigns a tracking number. */
-export async function assignAwb(shipmentId: string) {
+/** Books a courier and assigns a tracking number. Without courierId, Shiprocket picks its recommended courier. */
+export async function assignAwb(shipmentId: string, courierId?: number) {
   const res = await call<AwbResponse>("/courier/assign/awb", {
     method: "POST",
-    body: JSON.stringify({ shipment_id: Number(shipmentId) }),
+    body: JSON.stringify({ shipment_id: Number(shipmentId), ...(courierId ? { courier_id: courierId } : {}) }),
   });
   const data = res.response?.data;
   if (res.awb_assign_status !== 1 || !data?.awb_code) throw new Error(res.message ?? "Shiprocket could not assign an AWB");
@@ -155,4 +160,101 @@ export function cancelShiprocketOrder(shiprocketOrderId: string) {
 
 export function publicTrackingUrl(awb: string) {
   return `https://shiprocket.co/tracking/${encodeURIComponent(awb)}`;
+}
+
+/** Box and padding added on top of the products' own weight. */
+export const PACKAGING_GRAMS = 100;
+
+export function parcelWeightKg(productGrams: number) {
+  return Math.max(0.1, Math.round((productGrams + PACKAGING_GRAMS) / 10) / 100);
+}
+
+export type CourierChoice = "cheapest" | "fastest" | "recommended";
+export type CourierQuote = { id: number; name: string; rate: number; days: number | null; etd: string | null };
+/** `courier` is the one picked by the store's courier choice; etd/days describe that courier. */
+export type Serviceability = { serviceable: boolean; etd: string | null; days: number | null; codAvailable: boolean; courier: CourierQuote | null };
+const serviceCache = new Map<string, { at: number; value: Serviceability }>();
+
+type ServiceabilityResponse = {
+  data?: {
+    recommended_courier_company_id?: number;
+    available_courier_companies?: {
+      courier_company_id: number;
+      courier_name: string;
+      freight_charge?: number;
+      rate?: number;
+      etd?: string;
+      estimated_delivery_days?: string | number;
+      cod?: number;
+    }[];
+  };
+};
+
+function pickCourier(options: CourierQuote[], choice: CourierChoice, recommendedId?: number) {
+  if (!options.length) return null;
+  const byRate = (a: CourierQuote, b: CourierQuote) => a.rate - b.rate;
+  const byDays = (a: CourierQuote, b: CourierQuote) => (a.days ?? 99) - (b.days ?? 99) || byRate(a, b);
+  if (choice === "recommended") return options.find((o) => o.id === recommendedId) ?? [...options].sort(byRate)[0];
+  return [...options].sort(choice === "fastest" ? byDays : (a, b) => byRate(a, b) || byDays(a, b))[0];
+}
+
+/**
+ * Which couriers can deliver this parcel to this PIN code, at what freight rate, and by when.
+ * Cached for 6 hours per PIN / weight / COD / choice, so checkout and "Create shipment" see the same courier.
+ */
+export async function checkServiceability(
+  deliveryPincode: string,
+  opts: { weightKg?: number; cod?: boolean; choice?: CourierChoice } = {},
+): Promise<Serviceability> {
+  const { weightKg = 0.2, cod = false, choice = "cheapest" } = opts;
+  const key = `${deliveryPincode}:${weightKg}:${cod ? 1 : 0}:${choice}`;
+  const hit = serviceCache.get(key);
+  if (hit && Date.now() - hit.at < 6 * 3600e3) return hit.value;
+  const q = new URLSearchParams({
+    pickup_postcode: env.shiprocket.pickupPincode,
+    delivery_postcode: deliveryPincode,
+    weight: String(weightKg),
+    cod: cod ? "1" : "0",
+  });
+  let value: Serviceability;
+  try {
+    const res = await call<ServiceabilityResponse>(`/courier/serviceability/?${q}`);
+    const raw = res.data?.available_courier_companies ?? [];
+    const options = raw
+      .filter((o) => !cod || o.cod === 1)
+      .map((o) => ({
+        id: o.courier_company_id,
+        name: o.courier_name,
+        rate: Number(o.freight_charge ?? o.rate ?? 0),
+        days: Number(o.estimated_delivery_days) || null,
+        etd: o.etd ?? null,
+      }));
+    const courier = pickCourier(options, choice, res.data?.recommended_courier_company_id);
+    value = {
+      serviceable: options.length > 0,
+      etd: courier?.etd ?? null,
+      days: courier?.days ?? null,
+      codAvailable: raw.some((o) => o.cod === 1),
+      courier,
+    };
+  } catch (err) {
+    // Shiprocket answers 404 for PIN codes it can't serve.
+    if (err instanceof Error && /no courier|not serviceable|404/i.test(err.message)) {
+      value = { serviceable: false, etd: null, days: null, codAvailable: false, courier: null };
+    } else {
+      throw err;
+    }
+  }
+  serviceCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+/** Courier shipping label PDF for a shipment. Returns a URL to open and print. */
+export async function generateLabel(shipmentId: string) {
+  const res = await call<{ label_created?: number; label_url?: string; response?: string }>("/courier/generate/label", {
+    method: "POST",
+    body: JSON.stringify({ shipment_id: [Number(shipmentId)] }),
+  });
+  if (!res.label_url) throw new Error(res.response ?? "Shiprocket did not return a label");
+  return res.label_url;
 }

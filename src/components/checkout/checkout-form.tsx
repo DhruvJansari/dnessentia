@@ -5,14 +5,17 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import {
+  checkPincodeAction,
   confirmPaymentAction,
   paymentFailedAction,
   placeOrderAction,
   quoteAction,
   retryPaymentAction,
+  type DeliveryEstimate,
   type QuoteSummary,
   type RazorpayPayload,
 } from "@/app/(store)/checkout/actions";
+import { track } from "@/components/analytics";
 import { useCart } from "@/components/cart/cart-context";
 import { ArrowIcon, CheckIcon, ChevronIcon, ShieldIcon } from "@/components/icons";
 import { Field, FormAlert, SelectField, Spinner, TextAreaField } from "@/components/ui/form";
@@ -81,6 +84,8 @@ export function CheckoutForm({ user, savedAddresses, codEnabled, codFee, razorpa
   const [note, setNote] = useState("");
   const [couponInput, setCouponInput] = useState("");
   const [coupon, setCoupon] = useState("");
+  const [giftVariantId, setGiftVariantId] = useState<number | null>(null);
+  const [delivery, setDelivery] = useState<DeliveryEstimate | null>(null);
   const [quote, setQuote] = useState<QuoteSummary | null>(null);
   const [quoting, startQuote] = useTransition();
   const [submitting, setSubmitting] = useState(false);
@@ -90,10 +95,30 @@ export function CheckoutForm({ user, savedAddresses, codEnabled, codFee, razorpa
 
   const lines = useMemo(() => items.map((i) => ({ variantId: i.variantId, qty: i.qty, selections: i.selections })), [items]);
 
+  // A full PIN code lets the quote use the live courier rate for that address.
+  const quotePin = /^[1-9]\d{5}$/.test(address.pincode.trim()) ? address.pincode.trim() : undefined;
   useEffect(() => {
     if (lines.length === 0) return;
-    startQuote(async () => setQuote(await quoteAction({ lines, couponCode: coupon || undefined, paymentMethod })));
-  }, [lines, coupon, paymentMethod]);
+    startQuote(async () => setQuote(await quoteAction({ lines, couponCode: coupon || undefined, giftVariantId, paymentMethod, pincode: quotePin })));
+  }, [lines, coupon, giftVariantId, paymentMethod, quotePin]);
+
+  useEffect(() => {
+    track("begin_checkout", { items: items.map((i) => ({ item_id: i.slug, item_name: i.name, item_variant: i.variant, price: i.price, quantity: i.qty })) });
+    // Only once per visit to checkout.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // "Delivers by" check once a full PIN code is typed.
+  const pin = address.pincode.trim();
+  useEffect(() => {
+    if (!/^[1-9]\d{5}$/.test(pin)) return;
+    let cancelled = false;
+    checkPincodeAction(pin).then((r) => !cancelled && setDelivery(r));
+    return () => {
+      cancelled = true;
+    };
+  }, [pin]);
+  const pinValid = /^[1-9]\d{5}$/.test(pin);
 
   const pickSaved = (id: number | "new") => {
     setSavedId(id);
@@ -150,6 +175,7 @@ export function CheckoutForm({ user, savedAddresses, codEnabled, codFee, razorpa
         note: showNote ? note : undefined,
         // Only send a coupon the server has already accepted; a rejected one just shows its message.
         couponCode: quote?.couponCode ?? undefined,
+        giftVariantId: quote?.giftVariantId ?? null,
         paymentMethod,
         lines,
       });
@@ -320,7 +346,24 @@ export function CheckoutForm({ user, savedAddresses, codEnabled, codFee, razorpa
             <Field label="Apartment, landmark (optional)" name="line2" autoComplete="address-line2" value={address.line2} onChange={setAddr("line2")} className="sm:col-span-2" />
             <Field label="City" name="city" autoComplete="address-level2" required value={address.city} onChange={setAddr("city")} error={errors["address.city"]} />
             <SelectField label="State" name="state" options={indianStates} required value={address.state} onChange={setAddr("state")} error={errors["address.state"]} />
-            <Field label="PIN code" name="pincode" inputMode="numeric" autoComplete="postal-code" maxLength={6} required value={address.pincode} onChange={setAddr("pincode")} error={errors["address.pincode"]} />
+            <Field
+              label="PIN code"
+              name="pincode"
+              inputMode="numeric"
+              autoComplete="postal-code"
+              maxLength={6}
+              required
+              value={address.pincode}
+              onChange={setAddr("pincode")}
+              error={errors["address.pincode"] ?? (pinValid && delivery?.serviceable === false ? "Sorry, we don't deliver to this PIN code yet." : undefined)}
+              hint={
+                pinValid && delivery?.serviceable
+                  ? delivery.etd
+                    ? `Delivers by ${delivery.etd}`
+                    : `Delivers in about ${delivery.days ?? "3-7"} days`
+                  : "Usually delivered in 3-7 business days"
+              }
+            />
             <Field label="Phone" name="phone" type="tel" autoComplete="tel" required value={address.phone} onChange={setAddr("phone")} error={errors["address.phone"]} hint="For delivery updates from the courier" />
           </div>
           {showSaveAddress && (
@@ -365,8 +408,12 @@ export function CheckoutForm({ user, savedAddresses, codEnabled, codFee, razorpa
           )}
           <p className="mt-6 text-[13px] text-muted">
             By placing your order you agree to our{" "}
+            <Link href="/terms" className="underline underline-offset-4">
+              Terms
+            </Link>
+            ,{" "}
             <Link href="/refund-returns" className="underline underline-offset-4">
-              Returns policy
+              Cancellation & Replacement policy
             </Link>{" "}
             and{" "}
             <Link href="/privacy-policy" className="underline underline-offset-4">
@@ -399,8 +446,11 @@ export function CheckoutForm({ user, savedAddresses, codEnabled, codFee, razorpa
         onRemove={() => {
           setCoupon("");
           setCouponInput("");
+          setGiftVariantId(null);
         }}
+        onPickGift={setGiftVariantId}
         couponFieldError={errors.couponCode}
+        quotePin={quotePin}
       />
     </form>
   );
@@ -445,7 +495,11 @@ function OrderSummary({
   onApply,
   onRemove,
   couponFieldError,
+  onPickGift,
+  quotePin,
 }: {
+  quotePin?: string;
+  onPickGift: (variantId: number) => void;
   quote: QuoteSummary | null;
   quoting: boolean;
   couponInput: string;
@@ -498,6 +552,22 @@ function OrderSummary({
                 <span>
                   <span className="font-medium">{quote.couponCode}</span> applied
                   {quote.giftNote && <span className="block text-[12px] text-gold">🎁 {quote.giftNote}</span>}
+                  {quote.giftOptions.length > 1 && (
+                    <label className="mt-2 block text-[12px] text-muted">
+                      Choose your free sample
+                      <select
+                        value={quote.giftVariantId ?? ""}
+                        onChange={(e) => onPickGift(Number(e.target.value))}
+                        className="mt-1 block h-9 w-full border border-line bg-white px-2 text-[13px] text-ink"
+                      >
+                        {quote.giftOptions.map((g) => (
+                          <option key={g.variantId} value={g.variantId}>
+                            {g.name} ({g.label})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                 </span>
                 <button type="button" onClick={onRemove} className="text-muted underline underline-offset-4 hover:text-ink">
                   Remove
@@ -537,7 +607,13 @@ function OrderSummary({
             <Row
               label="Shipping"
               value={quote ? (quote.shippingFee ? formatPrice(quote.shippingFee) : "Free") : "…"}
-              hint={quote && quote.shippingFee > 0 ? `Free above ${formatPrice(quote.freeShippingThreshold)}` : undefined}
+              hint={
+                quote && quote.shippingFee > 0
+                  ? quote.shippingSource === "courier"
+                    ? `${quote.shippingCourier} to ${quotePin}. Free above ${formatPrice(quote.freeShippingThreshold)}`
+                    : `${quotePin ? "" : "Enter your PIN code for the exact rate. "}Free above ${formatPrice(quote.freeShippingThreshold)}`
+                  : undefined
+              }
             />
             {quote && quote.codFee > 0 && <Row label="COD fee" value={formatPrice(quote.codFee)} />}
             <div className="flex items-baseline justify-between border-t border-line pt-3">

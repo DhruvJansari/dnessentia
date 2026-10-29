@@ -50,7 +50,7 @@ function itemsTable(order: Order, items: OrderItem[]) {
       i.selections?.length ? `<br>${esc(i.selections.join(", "))}` : ""
     }</span>
   </td>
-  <td align="right" style="padding:12px 0;border-bottom:1px solid ${C.line};font-size:14px;white-space:nowrap;">${inr(i.lineTotal)}</td>
+  <td align="right" style="padding:12px 0;border-bottom:1px solid ${C.line};font-size:14px;white-space:nowrap;">${i.isGift ? "Free" : inr(i.lineTotal)}</td>
 </tr>`,
     )
     .join("");
@@ -176,18 +176,102 @@ export function orderDeliveredTemplate(order: Order, trackLink: string): Email {
 }
 
 export function orderCancelledTemplate(order: Order, reason: string | null): Email {
+  const refund =
+    order.refundedAmount > 0
+      ? para(
+          `A refund of <strong>${inr(order.refundedAmount)}</strong> has been issued to your original payment method${
+            order.cancellationCharge ? ` (cancellation charge of ${inr(order.cancellationCharge)} deducted)` : ""
+          }. It usually reaches your account in 5-7 business days.`,
+        )
+      : order.paymentStatus === "paid"
+        ? para("Your refund will be processed to the original payment method within 5-7 business days.")
+        : "";
   return {
     subject: `Order ${order.orderNumber} cancelled`,
     html: layout(
       `Order ${order.orderNumber} was cancelled`,
       heading("Order cancelled") +
         para(`Order <strong>${order.orderNumber}</strong> has been cancelled.${reason ? ` Reason: ${esc(reason)}` : ""}`) +
-        (order.paymentStatus === "paid" || order.paymentStatus === "refunded"
-          ? para("If you paid online, your refund will be processed to the original payment method within 5–7 business days.")
-          : "") +
+        refund +
         small("Questions? Just reply to this email."),
     ),
-    text: `Order ${order.orderNumber} has been cancelled.${reason ? ` Reason: ${reason}` : ""}`,
+    text: `Order ${order.orderNumber} has been cancelled.${reason ? ` Reason: ${reason}` : ""}${
+      order.refundedAmount ? ` Refund: ${inr(order.refundedAmount)}.` : ""
+    }`,
+  };
+}
+
+export function paymentReminderTemplate(order: Order, link: string, expiresInHours: number): Email {
+  return {
+    subject: `Complete your payment for order ${order.orderNumber}`,
+    html: layout(
+      "Your attars are waiting",
+      heading("Your order is waiting") +
+        para(`Hi ${esc(order.customerName.split(" ")[0])}, we saved order <strong>${order.orderNumber}</strong> (${inr(order.total)}) but the payment wasn't completed.`) +
+        button(link, "Complete payment") +
+        small(`Unpaid orders are cancelled automatically after about ${expiresInHours} hours.`),
+    ),
+    text: `Complete your payment for order ${order.orderNumber}: ${link}`,
+  };
+}
+
+const reasonText: Record<string, string> = {
+  damaged: "Damaged product",
+  leaked: "Leaked bottle",
+  wrong_item: "Wrong product received",
+  missing_item: "Item missing",
+  other: "Other issue",
+};
+export const replacementReasonLabel = (r: string) => reasonText[r] ?? r;
+
+export function replacementReceivedTemplate(order: Order, reason: string, link: string): Email {
+  return {
+    subject: `We received your replacement request for ${order.orderNumber}`,
+    html: layout(
+      "Replacement request received",
+      heading("Request received") +
+        para(`We've received your replacement request for order <strong>${order.orderNumber}</strong> (${esc(replacementReasonLabel(reason))}). Our team will review it within 1-2 business days.`) +
+        para("Please keep the product and its packaging until the review is complete.") +
+        button(link, "View order"),
+    ),
+    text: `Replacement request received for order ${order.orderNumber}. We will review it within 1-2 business days.`,
+  };
+}
+
+export function replacementDecisionTemplate(order: Order, approved: boolean, note: string | null, link: string): Email {
+  return {
+    subject: approved ? `Replacement approved for order ${order.orderNumber}` : `Update on your replacement request for ${order.orderNumber}`,
+    html: layout(
+      approved ? "Replacement approved" : "Replacement request update",
+      heading(approved ? "Replacement approved" : "Replacement request declined") +
+        para(
+          approved
+            ? `Good news! We're sending a replacement for order <strong>${order.orderNumber}</strong>. You'll get tracking details as soon as it ships.`
+            : `We reviewed your replacement request for order <strong>${order.orderNumber}</strong> and couldn't approve it.`,
+        ) +
+        (note ? para(`<em>${esc(note)}</em>`) : "") +
+        button(link, "View order"),
+    ),
+    text: `${approved ? "Replacement approved" : "Replacement declined"} for order ${order.orderNumber}.${note ? ` ${note}` : ""}`,
+  };
+}
+
+export function adminAlertTemplate(subject: string, lines: string[], link: string): Email {
+  return {
+    subject,
+    html: layout(subject, heading(subject) + lines.map((l) => para(esc(l))).join("") + button(link, "Open in admin")),
+    text: [subject, ...lines, link].join("\n"),
+  };
+}
+
+export function contactAckTemplate(name: string): Email {
+  return {
+    subject: "We got your message",
+    html: layout(
+      "Thanks for reaching out",
+      heading(`Thanks, ${esc(name.split(" ")[0])}`) + para("We've received your message and will reply within one business day."),
+    ),
+    text: "Thanks for contacting DN Essentia. We will reply within one business day.",
   };
 }
 

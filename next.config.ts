@@ -16,6 +16,7 @@ const legacyRedirects: [string, string][] = [
 ];
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ['192.168.1.3'],
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {

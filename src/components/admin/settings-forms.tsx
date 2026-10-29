@@ -1,14 +1,15 @@
 "use client";
 
 import { useActionState, useState, useTransition } from "react";
-import { saveSettingsAction, testEmailAction, testShiprocketAction } from "@/app/admin/settings/actions";
+import { runMaintenanceAction, saveSettingsAction, testEmailAction, testShiprocketAction } from "@/app/admin/settings/actions";
 import type { FormState } from "@/lib/validation";
 import { Spinner, SubmitButton } from "../ui/form";
 import { btn, input } from "./ui";
 
 type FieldDef =
   | { name: string; label: string; type: "number" | "text" | "email"; value: string | number; hint?: string; suffix?: string }
-  | { name: string; label: string; type: "checkbox"; value: boolean; hint?: string };
+  | { name: string; label: string; type: "checkbox"; value: boolean; hint?: string }
+  | { name: string; label: string; type: "select"; value: string; options: { value: string; label: string }[]; hint?: string };
 
 export function SettingsForm({ section, fields }: { section: string; fields: FieldDef[] }) {
   const [state, action] = useActionState(saveSettingsAction, {} as FormState);
@@ -30,10 +31,20 @@ export function SettingsForm({ section, fields }: { section: string; fields: Fie
               {f.label}
               {state.fieldErrors?.[f.name] && <span className="ml-2 font-normal text-red-700">{state.fieldErrors[f.name]}</span>}
             </span>
-            <div className="relative">
-              <input name={f.name} type={f.type} defaultValue={f.value} className={input} />
-              {f.suffix && <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-stone-400">{f.suffix}</span>}
-            </div>
+            {f.type === "select" ? (
+              <select name={f.name} defaultValue={f.value} className={input}>
+                {f.options.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="relative">
+                <input name={f.name} type={f.type} defaultValue={f.value} className={input} />
+                {f.suffix && <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-stone-400">{f.suffix}</span>}
+              </div>
+            )}
             {f.hint && <span className="mt-1 block text-[12px] text-stone-500">{f.hint}</span>}
           </label>
         ),
@@ -81,6 +92,19 @@ export function CopyField({ value }: { value: string }) {
       >
         {copied ? "Copied" : "Copy"}
       </button>
+    </div>
+  );
+}
+
+export function MaintenanceButton() {
+  const [pending, start] = useTransition();
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  return (
+    <div>
+      <button type="button" disabled={pending} onClick={() => start(async () => setResult(await runMaintenanceAction()))} className={btn.secondary}>
+        {pending && <Spinner />} Run now
+      </button>
+      {result && <p className={`mt-2 text-[13px] ${result.ok ? "text-emerald-700" : "text-red-700"}`}>{result.message}</p>}
     </div>
   );
 }

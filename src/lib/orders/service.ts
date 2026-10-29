@@ -1,8 +1,8 @@
 import "server-only";
 import { and, eq, sql } from "drizzle-orm";
-import { coupons, db, orderItems, orders, payments, productVariants, type OrderStatus } from "@/db";
+import { coupons, db, orderItems, orders, payments, productVariants, replacementRequests, type OrderStatus } from "@/db";
 import { orderEvent } from "../audit";
-import { integrations } from "../env";
+import { env, integrations } from "../env";
 import { sendMail } from "../mail/send";
 import {
   adminNewOrderTemplate,
@@ -16,13 +16,16 @@ import { getSettings } from "../settings";
 import {
   assignAwb,
   cancelShiprocketOrder,
+  checkServiceability,
   createShiprocketOrder,
+  parcelWeightKg,
   publicTrackingUrl,
   requestPickup,
   trackAwb,
 } from "../shiprocket";
 import { hashToken } from "../tokens";
 import { adminOrderUrl, orderAccessKey, orderUrl } from "./access";
+import { assignInvoiceNumber } from "./invoice";
 import type { Quote } from "./pricing";
 
 type Actor = { type: "system" | "customer" | "admin" | "webhook"; id?: number | null };
@@ -97,6 +100,7 @@ export async function createOrder(input: NewOrderInput) {
         quantity: l.quantity,
         lineTotal: l.lineTotal,
         selections: l.selections,
+        isGift: l.isGift,
       })),
     );
     return id;
@@ -184,6 +188,8 @@ async function confirmOrder(orderId: number, actor: Actor, message: string) {
   await orderEvent({ orderId, type: "status", message, actorType: actor.type, actorId: actor.id });
   await deductStock(orderId);
 
+  const settingsForInvoice = await getSettings();
+  await assignInvoiceNumber(orderId, settingsForInvoice.business.invoicePrefix);
   const order = await getOrderWithItems(orderId);
   if (order.couponCode) {
     await db.update(coupons).set({ usedCount: sql`${coupons.usedCount} + 1` }).where(eq(coupons.code, order.couponCode));
@@ -311,28 +317,38 @@ export async function changeOrderStatus(orderId: number, to: OrderStatus, actor:
     await emailForOrder(updated, updated.email, orderShippedTemplate(updated, link, updated.awbCode ? publicTrackingUrl(updated.awbCode) : null), "order_shipped");
   } else if (to === "delivered") {
     await emailForOrder(updated, updated.email, orderDeliveredTemplate(updated, link), "order_delivered");
+    if (updated.kind === "replacement") {
+      await db.update(replacementRequests).set({ status: "completed" }).where(eq(replacementRequests.replacementOrderId, orderId));
+    }
   } else if (to === "cancelled") {
     await emailForOrder(updated, updated.email, orderCancelledTemplate(updated, note ?? null), "order_cancelled");
   }
   return updated;
 }
 
-/** Full refund of an online payment through Razorpay. */
-export async function refundOrder(orderId: number, actor: Actor) {
+/** Refunds an online payment through Razorpay: the full remaining amount, or `amount` rupees. */
+export async function refundOrder(orderId: number, actor: Actor, amount?: number) {
   const order = await getOrderWithItems(orderId);
-  if (order.paymentMethod !== "razorpay" || order.paymentStatus !== "paid" || !order.razorpayPaymentId) {
+  if (order.paymentMethod !== "razorpay" || !["paid", "refunded"].includes(order.paymentStatus) || !order.razorpayPaymentId) {
     throw new Error("Only paid Razorpay orders can be refunded here.");
   }
-  const refund = await refundPayment(order.razorpayPaymentId);
-  await db.update(orders).set({ paymentStatus: "refunded" }).where(eq(orders.id, orderId));
+  const remaining = order.total - order.refundedAmount;
+  const toRefund = Math.min(remaining, amount ?? remaining);
+  if (toRefund <= 0) throw new Error("Nothing left to refund on this order.");
+  const refund = await refundPayment(order.razorpayPaymentId, toRefund);
+  await db
+    .update(orders)
+    .set({ paymentStatus: "refunded", refundedAmount: order.refundedAmount + toRefund })
+    .where(eq(orders.id, orderId));
   await db.update(payments).set({ status: "refunded" }).where(eq(payments.providerPaymentId, order.razorpayPaymentId));
   await orderEvent({
     orderId,
     type: "payment",
-    message: `Refund of ₹${refund.amount / 100} issued (${refund.id})`,
+    message: `Refund of ₹${toRefund} issued (${refund.id})`,
     actorType: actor.type,
     actorId: actor.id,
   });
+  return toRefund;
 }
 
 /* -------------------------------- Shipping --------------------------------- */
@@ -343,14 +359,14 @@ export async function createShipment(orderId: number, actor: Actor) {
   let order = await getOrderWithItems(orderId);
   if (!["confirmed", "processing"].includes(order.status)) throw new Error("Only confirmed orders can be shipped.");
   const settings = await getSettings();
+  const weights = await db
+    .select({ id: productVariants.id, weight: productVariants.weightGrams })
+    .from(productVariants)
+    .where(sql`${productVariants.id} in (${sql.join(order.items.map((i) => sql`${i.variantId}`), sql`, `)})`);
+  const weightMap = new Map(weights.map((w) => [w.id, w.weight]));
+  const grams = order.items.reduce((n, i) => n + (weightMap.get(i.variantId) ?? 50) * i.quantity, 0);
 
   if (!order.shiprocketShipmentId) {
-    const weights = await db
-      .select({ id: productVariants.id, weight: productVariants.weightGrams })
-      .from(productVariants)
-      .where(sql`${productVariants.id} in (${sql.join(order.items.map((i) => sql`${i.variantId}`), sql`, `)})`);
-    const weightMap = new Map(weights.map((w) => [w.id, w.weight]));
-    const grams = order.items.reduce((n, i) => n + (weightMap.get(i.variantId) ?? 50) * i.quantity, 0) + 100;
     const created = await createShiprocketOrder(order, order.items, settings.fulfilment, grams);
     await db
       .update(orders)
@@ -366,8 +382,29 @@ export async function createShipment(orderId: number, actor: Actor) {
     order = await getOrderWithItems(orderId);
   }
 
+  if (env.shiprocket.testOnly) {
+    await orderEvent({
+      orderId,
+      type: "shipment",
+      message: "Test-only mode: courier and pickup skipped. Cancel the order to remove it from Shiprocket.",
+      isInternal: true,
+    });
+    return order;
+  }
+
   if (!order.awbCode && order.shiprocketShipmentId) {
-    const awb = await assignAwb(order.shiprocketShipmentId);
+    // Book the same courier checkout quoted (by the store's courier choice). If the lookup fails, Shiprocket picks.
+    const choice = settings.shipping.courierChoice;
+    const courier =
+      choice === "recommended"
+        ? null
+        : await checkServiceability(order.shipPincode, { weightKg: parcelWeightKg(grams), cod: order.paymentMethod === "cod", choice })
+            .then((s) => s.courier)
+            .catch((err) => {
+              void orderEvent({ orderId, type: "shipment", message: `Courier lookup failed, letting Shiprocket choose: ${errorText(err)}`, isInternal: true });
+              return null;
+            });
+    const awb = await assignAwb(order.shiprocketShipmentId, courier?.id);
     await db.update(orders).set({ awbCode: awb.awbCode, courierName: awb.courierName }).where(eq(orders.id, orderId));
     await orderEvent({
       orderId,

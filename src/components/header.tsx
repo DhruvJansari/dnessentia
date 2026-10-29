@@ -5,7 +5,9 @@ import { usePathname } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { mainNav, site } from "@/data/site";
 import { useCart } from "./cart/cart-context";
-import { BagIcon, CloseIcon, InstagramIcon, MenuIcon, UserIcon, WhatsAppIcon } from "./icons";
+import { BagIcon, CloseIcon, HeartIcon, InstagramIcon, MenuIcon, SearchIcon, UserIcon, WhatsAppIcon } from "./icons";
+import { SearchDialog } from "./search-dialog";
+import { useStore } from "./store-context";
 import { Logo } from "./logo";
 
 const announcements = [
@@ -67,6 +69,21 @@ function MainNavItems(props: NavItemsProps) {
 
 export function Header() {
   const { count, open } = useCart();
+  const { wishlist } = useStore();
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  useEffect(() => {
+    // "/" opens search from anywhere, unless typing in a field.
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (e.key === "/" && !/input|textarea|select/i.test(t.tagName) && !t.isContentEditable) {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -128,15 +145,26 @@ export function Header() {
           <Logo preload className="h-9 md:h-11" />
 
           <div className="flex items-center justify-end gap-1 sm:gap-3">
-            <a
-              href={site.instagram}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="DN Essentia on Instagram"
-              className="hidden size-10 place-items-center text-ink-soft hover:text-ink sm:grid"
+            <button
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              aria-label="Search products"
+              className="grid size-10 place-items-center text-ink-soft transition-colors hover:text-ink"
             >
-              <InstagramIcon className="size-5" />
-            </a>
+              <SearchIcon className="size-[21px]" />
+            </button>
+            <Link
+              href="/wishlist"
+              aria-label={`Wishlist, ${wishlist.length} saved`}
+              className="relative hidden size-10 place-items-center text-ink-soft transition-colors hover:text-ink sm:grid"
+            >
+              <HeartIcon className="size-[21px]" />
+              {wishlist.length > 0 && (
+                <span key={wishlist.length} className="absolute right-0.5 top-0.5 grid min-w-[18px] animate-pop place-items-center rounded-full bg-ink px-1 text-[10px] font-medium leading-[18px] text-ivory">
+                  {wishlist.length}
+                </span>
+              )}
+            </Link>
             <Link
               href="/account"
               aria-label="Your account"
@@ -163,6 +191,8 @@ export function Header() {
           </div>
         </div>
       </header>
+
+      <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
 
       {/* Mobile / tablet navigation */}
       <div className={`fixed inset-0 z-[70] lg:hidden ${menuOpen ? "" : "pointer-events-none"}`} aria-hidden={!menuOpen}>
@@ -191,6 +221,7 @@ export function Header() {
             </ul>
             <ul className="mt-8 space-y-3 text-sm text-muted">
               <li><Link href="/account" onClick={closeMenu}>My account</Link></li>
+              <li><Link href="/wishlist" onClick={closeMenu}>Wishlist{wishlist.length ? ` (${wishlist.length})` : ""}</Link></li>
               <li><Link href="/track" onClick={closeMenu}>Track order</Link></li>
               <li><Link href="/faq" onClick={closeMenu}>FAQs</Link></li>
               <li><Link href="/shipping-delivery" onClick={closeMenu}>Shipping & Delivery</Link></li>

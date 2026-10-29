@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { OrderView } from "@/components/orders/order-view";
-import { orderAccessKey } from "@/lib/orders/access";
 import { getViewableOrder } from "@/lib/orders/queries";
 
 export const metadata: Metadata = { title: "Your order", robots: { index: false } };
@@ -32,12 +31,13 @@ async function OrderContent({ params, searchParams }: Pick<PageProps<"/order/[nu
       </div>
     );
   }
-  const { order, events, user, isFresh } = result;
+  const { order, events, user, isFresh, accessKey, afterSales } = result;
   return (
     <OrderView
       order={order}
       events={events}
-      accessKey={orderAccessKey(order.orderNumber)}
+      accessKey={accessKey}
+      afterSales={afterSales}
       thanks={isFresh}
       isGuest={!user && !order.userId}
     />

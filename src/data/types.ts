@@ -6,8 +6,11 @@ export type AttarSize = {
   stock: number;
 };
 
+export type Rating = { average: number; count: number };
+
 export type Attar = {
   id: number;
+  rating: Rating | null;
   slug: string;
   name: string;
   image: string;
@@ -22,6 +25,7 @@ export type Attar = {
 
 export type Combo = {
   id: number;
+  rating: Rating | null;
   slug: string;
   name: string;
   image: string;
@@ -39,4 +43,19 @@ export type Combo = {
   perfectFor: string[];
   howToUse: string;
   whyChoose: string[];
+};
+
+/** Small, serialisable product summary shared with client features (search, wishlist, recently viewed, cart suggestions). */
+export type ProductSummary = {
+  id: number;
+  slug: string;
+  type: "attar" | "combo";
+  name: string;
+  image: string;
+  subtitle: string;
+  priceFrom: number;
+  keywords: string;
+  rating: Rating | null;
+  /** Cheapest in-stock variant, for one-click "add a sample". */
+  quickVariant: { id: number; label: string; price: number } | null;
 };

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Instrument_Serif } from "next/font/google";
 import localFont from "next/font/local";
+import { Analytics } from "@/components/analytics";
 import { site } from "@/data/site";
 import "./globals.css";
 
@@ -35,6 +36,7 @@ export const metadata: Metadata = {
     siteName: site.name,
     images: ["/images/brand/hero.png"],
   },
+  verification: process.env.NEXT_PUBLIC_GSC_VERIFICATION ? { google: process.env.NEXT_PUBLIC_GSC_VERIFICATION } : undefined,
 };
 
 export const viewport: Viewport = {
@@ -45,6 +47,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" data-scroll-behavior="smooth" className={`${instrumentSerif.variable} ${satoshi.variable}`}>
       <body className="flex min-h-svh flex-col">{children}</body>
+      <Analytics />
     </html>
   );
 }

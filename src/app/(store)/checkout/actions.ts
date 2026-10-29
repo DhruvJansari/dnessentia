@@ -9,9 +9,10 @@ import { createCustomer, findUserByEmail, sendVerificationEmail } from "@/lib/au
 import { createSession, getSessionUser, isStaff } from "@/lib/auth/session";
 import { env, integrations } from "@/lib/env";
 import { isValidOrderKey, orderAccessKey } from "@/lib/orders/access";
-import { quoteCart, type CartLineInput } from "@/lib/orders/pricing";
+import { quoteCart, type CartLineInput, type GiftOption, type ShippingSource } from "@/lib/orders/pricing";
 import { createOrder, errorText, markOrderPaid, startRazorpayPayment, type OrderRow } from "@/lib/orders/service";
 import { fetchPayment, verifyCheckoutSignature } from "@/lib/razorpay";
+import { checkServiceability } from "@/lib/shiprocket";
 import { rateLimit } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request";
 import { getSettings } from "@/lib/settings";
@@ -34,23 +35,35 @@ export type QuoteSummary = {
   couponCode: string | null;
   couponError: string | null;
   giftNote: string | null;
+  giftOptions: GiftOption[];
+  giftVariantId: number | null;
   errors: string[];
   freeShippingThreshold: number;
+  shippingSource: ShippingSource;
+  shippingCourier: string | null;
 };
 
-export async function quoteAction(input: { lines: CartLineInput[]; couponCode?: string; paymentMethod: "razorpay" | "cod" }): Promise<QuoteSummary> {
+export async function quoteAction(input: {
+  lines: CartLineInput[];
+  couponCode?: string;
+  giftVariantId?: number | null;
+  paymentMethod: "razorpay" | "cod";
+  pincode?: string;
+}): Promise<QuoteSummary> {
   const lines = linesSchema.safeParse(input.lines);
   const settings = await getSettings();
   const empty = {
     subtotal: 0, discount: 0, shippingFee: 0, codFee: 0, total: 0,
-    couponCode: null, couponError: null, giftNote: null, errors: ["Your bag is empty."],
-    freeShippingThreshold: settings.shipping.freeShippingThreshold,
+    couponCode: null, couponError: null, giftNote: null, giftOptions: [], giftVariantId: null, errors: ["Your bag is empty."],
+    freeShippingThreshold: settings.shipping.freeShippingThreshold, shippingSource: "free" as const, shippingCourier: null,
   };
   if (!lines.success) return empty;
   const quote = await quoteCart(lines.data, {
     couponCode: input.couponCode,
+    giftVariantId: input.giftVariantId ?? null,
     paymentMethod: paymentMethodSchema.catch("razorpay").parse(input.paymentMethod),
     settings,
+    deliveryPincode: typeof input.pincode === "string" ? input.pincode.slice(0, 6) : null,
   });
   return {
     subtotal: quote.subtotal,
@@ -61,8 +74,12 @@ export async function quoteAction(input: { lines: CartLineInput[]; couponCode?: 
     couponCode: quote.coupon?.code ?? null,
     couponError: quote.couponError,
     giftNote: quote.giftNote,
+    giftOptions: quote.giftOptions,
+    giftVariantId: quote.giftVariantId,
     errors: quote.errors,
     freeShippingThreshold: settings.shipping.freeShippingThreshold,
+    shippingSource: quote.shipping.source,
+    shippingCourier: quote.shipping.courierName,
   };
 }
 
@@ -92,6 +109,7 @@ const checkoutSchema = z
     saveAddress: z.boolean().default(false),
     note: z.string().trim().max(500).optional(),
     couponCode: z.string().trim().max(40).optional(),
+    giftVariantId: z.number().int().positive().nullable().optional(),
     paymentMethod: paymentMethodSchema,
     lines: linesSchema,
   })
@@ -129,7 +147,17 @@ async function placeOrder(payload: CheckoutPayload): Promise<PlaceOrderResult> {
     return { ok: false, error: "Online payment isn't set up yet. Please try again later or contact us on WhatsApp." };
   }
 
-  const quote = await quoteCart(data.lines, { couponCode: data.couponCode, paymentMethod: data.paymentMethod, settings });
+  const quote = await quoteCart(data.lines, {
+    couponCode: data.couponCode,
+    giftVariantId: data.giftVariantId,
+    paymentMethod: data.paymentMethod,
+    settings,
+    deliveryPincode: data.address.pincode,
+  });
+  const delivery = await deliveryEstimate(data.address.pincode);
+  if (delivery.serviceable === false) {
+    return { ok: false, fieldErrors: { "address.pincode": "Sorry, we don't deliver to this PIN code yet." }, error: "We can't deliver to this PIN code yet." };
+  }
   if (quote.errors.length) return { ok: false, error: quote.errors[0] };
   if (data.couponCode && quote.couponError) return { ok: false, fieldErrors: { couponCode: quote.couponError }, error: quote.couponError };
 
@@ -273,4 +301,27 @@ export async function trackOrderAction(_: { error?: string }, formData: FormData
   });
   if (!order) return { error: "We couldn't find an order with that number and email." };
   redirect(`/order/${order.orderNumber}?key=${orderAccessKey(order.orderNumber)}`);
+}
+
+export type DeliveryEstimate = { serviceable: boolean | null; etd: string | null; days: number | null };
+
+/** "Delivers by" lookup. serviceable is null when Shiprocket isn't configured or can't be reached. */
+async function deliveryEstimate(pincode: string): Promise<DeliveryEstimate> {
+  if (!/^[1-9]\d{5}$/.test(pincode) || !integrations.shiprocket() || !env.shiprocket.pickupPincode) {
+    return { serviceable: null, etd: null, days: null };
+  }
+  try {
+    const settings = await getSettings();
+    const r = await checkServiceability(pincode, { choice: settings.shipping.courierChoice });
+    return { serviceable: r.serviceable, etd: r.etd, days: r.days };
+  } catch (err) {
+    console.error("[pincode] serviceability check failed", err);
+    return { serviceable: null, etd: null, days: null };
+  }
+}
+
+export async function checkPincodeAction(pincode: string): Promise<DeliveryEstimate> {
+  const { ip } = await requestMeta();
+  if (!rateLimit(`pincode:${ip}`, 40, 10 * 60e3)) return { serviceable: null, etd: null, days: null };
+  return deliveryEstimate(pincode.trim());
 }

@@ -162,6 +162,11 @@ export const orders = mysqlTable(
   {
     id: int().autoincrement().primaryKey(),
     orderNumber: varchar({ length: 20 }).notNull(),
+    /** Replacement orders are free re-shipments created from an approved replacement request. */
+    kind: mysqlEnum(["standard", "replacement"]).notNull().default("standard"),
+    parentOrderId: int(),
+    invoiceNumber: varchar({ length: 30 }),
+    invoicedAt: timestamp({ mode: "date" }),
     /** Hash of the secret in the guest tracking link emailed to the customer. */
     accessTokenHash: varchar({ length: 64 }).notNull(),
     userId: int(),
@@ -192,6 +197,11 @@ export const orders = mysqlTable(
     courierName: varchar({ length: 120 }),
     trackingStatus: varchar({ length: 120 }),
     stockDeducted: boolean().notNull().default(false),
+    /** Amount kept when a customer cancels (cancellation charge) and amount refunded so far. */
+    cancellationCharge: int().notNull().default(0),
+    refundedAmount: int().notNull().default(0),
+    cancelReason: varchar({ length: 255 }),
+    paymentReminderSentAt: timestamp({ mode: "date" }),
     paidAt: timestamp({ mode: "date" }),
     shippedAt: timestamp({ mode: "date" }),
     deliveredAt: timestamp({ mode: "date" }),
@@ -202,6 +212,7 @@ export const orders = mysqlTable(
   },
   (t) => [
     uniqueIndex("orders_number_uq").on(t.orderNumber),
+    uniqueIndex("orders_invoice_uq").on(t.invoiceNumber),
     index("orders_user_idx").on(t.userId),
     index("orders_email_idx").on(t.email),
     index("orders_status_idx").on(t.status),
@@ -227,6 +238,8 @@ export const orderItems = mysqlTable(
     lineTotal: int().notNull(),
     /** Combo packs: the attars the customer picked. */
     selections: json().$type<string[]>(),
+    /** Free gift lines (e.g. FREEGIFT sample) are priced at 0. */
+    isGift: boolean().notNull().default(false),
   },
   (t) => [index("order_items_order_idx").on(t.orderId)],
 );
@@ -278,6 +291,8 @@ export const coupons = mysqlTable(
     /** free_gift adds a gift note to the order instead of a price reduction. */
     type: mysqlEnum(["percent", "fixed", "free_gift"]).notNull(),
     value: int().notNull().default(0),
+    /** free_gift coupons: the variant size the customer chooses a free sample in, e.g. "1 ml". */
+    giftSize: varchar({ length: 20 }),
     minOrder: int().notNull().default(0),
     maxUses: int(),
     usedCount: int().notNull().default(0),
@@ -341,6 +356,85 @@ export const webhookEvents = mysqlTable(
   (t) => [index("webhooks_provider_idx").on(t.provider, t.createdAt)],
 );
 
+/* ------------------------- Customer engagement ------------------------- */
+
+export const reviews = mysqlTable(
+  "reviews",
+  {
+    id: int().autoincrement().primaryKey(),
+    productId: int().notNull(),
+    userId: int(),
+    name: varchar({ length: 120 }).notNull(),
+    rating: int().notNull(),
+    title: varchar({ length: 160 }).notNull().default(""),
+    body: text().notNull(),
+    status: mysqlEnum(["pending", "approved", "rejected"]).notNull().default("pending"),
+    verifiedPurchase: boolean().notNull().default(false),
+    adminReply: text(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("reviews_product_idx").on(t.productId, t.status), index("reviews_user_idx").on(t.userId)],
+);
+
+export const wishlistItems = mysqlTable(
+  "wishlist_items",
+  {
+    id: int().autoincrement().primaryKey(),
+    userId: int().notNull(),
+    productId: int().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("wishlist_user_product_uq").on(t.userId, t.productId)],
+);
+
+export type ReplacementItem = { orderItemId: number; quantity: number };
+
+export const replacementRequests = mysqlTable(
+  "replacement_requests",
+  {
+    id: int().autoincrement().primaryKey(),
+    orderId: int().notNull(),
+    userId: int(),
+    items: json().$type<ReplacementItem[]>().notNull(),
+    reason: mysqlEnum(["damaged", "leaked", "wrong_item", "missing_item", "other"]).notNull(),
+    details: text().notNull(),
+    photos: json().$type<string[]>().notNull(),
+    videoUrl: varchar({ length: 500 }),
+    status: mysqlEnum(["requested", "approved", "rejected", "completed"]).notNull().default("requested"),
+    adminNote: varchar({ length: 500 }),
+    replacementOrderId: int(),
+    decidedBy: int(),
+    decidedAt: timestamp({ mode: "date" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("replacements_order_idx").on(t.orderId), index("replacements_status_idx").on(t.status)],
+);
+
+export const contactMessages = mysqlTable(
+  "contact_messages",
+  {
+    id: int().autoincrement().primaryKey(),
+    name: varchar({ length: 120 }).notNull(),
+    email: varchar({ length: 191 }).notNull(),
+    phone: varchar({ length: 20 }),
+    orderNumber: varchar({ length: 20 }),
+    subject: varchar({ length: 160 }).notNull(),
+    message: text().notNull(),
+    status: mysqlEnum(["new", "replied", "closed"]).notNull().default("new"),
+    ip: varchar({ length: 64 }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("contact_status_idx").on(t.status, t.createdAt)],
+);
+
+/** Gap-free sequences (invoice numbers per financial year). */
+export const counters = mysqlTable("counters", {
+  key: varchar({ length: 40 }).primaryKey(),
+  value: int().notNull().default(0),
+});
+
 export const settings = mysqlTable("settings", {
   key: varchar({ length: 80 }).primaryKey(),
   value: json().$type<unknown>().notNull(),
@@ -356,6 +450,15 @@ export const usersRelations = relations(users, ({ many }) => ({
 
 export const productsRelations = relations(products, ({ many }) => ({
   variants: many(productVariants),
+  reviews: many(reviews),
+}));
+
+export const reviewsRelations = relations(reviews, ({ one }) => ({
+  product: one(products, { fields: [reviews.productId], references: [products.id] }),
+}));
+
+export const replacementRelations = relations(replacementRequests, ({ one }) => ({
+  order: one(orders, { fields: [replacementRequests.orderId], references: [orders.id] }),
 }));
 
 export const variantsRelations = relations(productVariants, ({ one }) => ({

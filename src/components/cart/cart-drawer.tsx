@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { CloseIcon } from "../icons";
-import { CartLines, CartSummary, EmptyCart, FreeShippingMeter } from "./cart-contents";
+import { CartLines, CartSuggestions, CartSummary, EmptyCart, FreeShippingMeter } from "./cart-contents";
 import { useCart } from "./cart-context";
 
 export function CartDrawer() {
@@ -56,6 +56,7 @@ export function CartDrawer() {
             </div>
             <div className="flex-1 overflow-y-auto px-5 sm:px-7">
               <CartLines onNavigate={close} />
+              <CartSuggestions />
             </div>
             <div className="border-t border-line bg-cream px-5 py-6 sm:px-7">
               <CartSummary onNavigate={close} />

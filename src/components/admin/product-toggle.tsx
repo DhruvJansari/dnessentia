@@ -20,9 +20,9 @@ export function ProductActiveToggle({ id, active }: { id: number; active: boolea
           await setProductActiveAction(id, !optimistic);
         })
       }
-      className={`relative h-6 w-11 rounded-full transition-colors duration-300 ${optimistic ? "bg-emerald-500" : "bg-stone-300"}`}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0 transition-colors duration-300 disabled:opacity-60 ${optimistic ? "bg-emerald-500" : "bg-stone-300"}`}
     >
-      <span className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform duration-300 ${optimistic ? "translate-x-[22px]" : "translate-x-0.5"}`} />
+      <span className={`absolute left-0.5 top-0.5 size-5 rounded-full bg-white shadow transition-transform duration-300 ${optimistic ? "translate-x-5" : "translate-x-0"}`} />
     </button>
   );
 }

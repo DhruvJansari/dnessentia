@@ -1,7 +1,9 @@
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
 import { coupons, db, products, productVariants } from "@/db";
+import { env, integrations } from "../env";
 import type { StoreSettings } from "../settings-defaults";
+import { checkServiceability, parcelWeightKg } from "../shiprocket";
 
 export type CartLineInput = { variantId: number; qty: number; selections?: string[] };
 
@@ -18,7 +20,10 @@ export type PricedLine = {
   lineTotal: number;
   weightGrams: number;
   selections: string[] | null;
+  isGift: boolean;
 };
+
+export type GiftOption = { variantId: number; name: string; label: string };
 
 export type Quote = {
   lines: PricedLine[];
@@ -30,8 +35,15 @@ export type Quote = {
   coupon: { id: number; code: string; type: string; description: string } | null;
   couponError: string | null;
   giftNote: string | null;
+  /** free_gift coupons: the samples the customer can choose from, and the chosen one. */
+  giftOptions: GiftOption[];
+  giftVariantId: number | null;
   errors: string[];
+  /** Where shippingFee came from, and the courier it was quoted for. */
+  shipping: { source: ShippingSource; courierName: string | null; etd: string | null };
 };
+
+export type ShippingSource = "free" | "courier" | "flat";
 
 const MAX_QTY = 20;
 
@@ -41,7 +53,14 @@ const MAX_QTY = 20;
  */
 export async function quoteCart(
   input: CartLineInput[],
-  options: { couponCode?: string | null; paymentMethod: "razorpay" | "cod"; settings: StoreSettings },
+  options: {
+    couponCode?: string | null;
+    giftVariantId?: number | null;
+    paymentMethod: "razorpay" | "cod";
+    settings: StoreSettings;
+    /** The delivery PIN code, when known, for a live courier rate. */
+    deliveryPincode?: string | null;
+  },
 ): Promise<Quote> {
   const errors: string[] = [];
   const ids = [...new Set(input.map((l) => l.variantId))].filter((n) => Number.isInteger(n) && n > 0);
@@ -96,6 +115,7 @@ export async function quoteCart(
       lineTotal: row.variant.price * qty,
       weightGrams: row.variant.weightGrams,
       selections,
+      isGift: false,
     });
   }
 
@@ -135,10 +155,75 @@ export async function quoteCart(
     }
   }
 
-  const { freeShippingThreshold, flatFee } = options.settings.shipping;
-  const shippingFee = lines.length === 0 || subtotal >= freeShippingThreshold ? 0 : flatFee;
+  // A free_gift coupon with a size adds a ₹0 line for the sample the customer picks.
+  let giftOptions: GiftOption[] = [];
+  let giftVariantId: number | null = null;
+  if (coupon?.type === "free_gift") {
+    const c = await db.query.coupons.findFirst({ where: eq(coupons.id, coupon.id), columns: { giftSize: true } });
+    if (c?.giftSize) {
+      const rows = await db
+        .select({ variant: productVariants, product: products })
+        .from(productVariants)
+        .innerJoin(products, eq(products.id, productVariants.productId))
+        .where(and(eq(productVariants.label, c.giftSize), eq(productVariants.isActive, true), eq(products.isActive, true), eq(products.type, "attar")));
+      const inStock = rows.filter((r) => r.variant.stock - (qtyByVariant.get(r.variant.id) ?? 0) > 0);
+      giftOptions = inStock.map((r) => ({ variantId: r.variant.id, name: r.product.name, label: r.variant.label }));
+      const chosen = inStock.find((r) => r.variant.id === options.giftVariantId) ?? inStock[0];
+      if (chosen) {
+        giftVariantId = chosen.variant.id;
+        lines.push({
+          variantId: chosen.variant.id,
+          productId: chosen.product.id,
+          slug: chosen.product.slug,
+          name: chosen.product.name,
+          variantLabel: `${chosen.variant.label} sample`,
+          sku: chosen.variant.sku,
+          image: chosen.product.images[0] ?? "",
+          unitPrice: 0,
+          quantity: 1,
+          lineTotal: 0,
+          weightGrams: chosen.variant.weightGrams,
+          selections: null,
+          isGift: true,
+        });
+        giftNote = `Free ${chosen.variant.label} ${chosen.product.name} sample`;
+      }
+    }
+  }
+
+  const shipping = await shippingQuote(lines, subtotal, options);
+  const shippingFee = shipping.fee;
   const codFee = options.paymentMethod === "cod" ? options.settings.payments.codFee : 0;
   const total = Math.max(0, subtotal - discount + shippingFee + codFee);
 
-  return { lines, subtotal, discount, shippingFee, codFee, total, coupon, couponError, giftNote, errors };
+  return {
+    lines, subtotal, discount, shippingFee, codFee, total, coupon, couponError, giftNote, giftOptions, giftVariantId, errors,
+    shipping: { source: shipping.source, courierName: shipping.courierName, etd: shipping.etd },
+  };
+}
+
+/**
+ * Shipping fee below the free-shipping threshold: the Shiprocket freight rate of the store's chosen courier for
+ * this PIN code and parcel weight, rounded up to the rupee. Falls back to the flat fee without a PIN code, when
+ * Shiprocket isn't configured, or when it can't be reached.
+ */
+async function shippingQuote(
+  lines: PricedLine[],
+  subtotal: number,
+  options: { paymentMethod: "razorpay" | "cod"; settings: StoreSettings; deliveryPincode?: string | null },
+): Promise<{ fee: number; source: ShippingSource; courierName: string | null; etd: string | null }> {
+  const { freeShippingThreshold, flatFee, rateSource, courierChoice } = options.settings.shipping;
+  if (lines.length === 0 || subtotal >= freeShippingThreshold) return { fee: 0, source: "free", courierName: null, etd: null };
+  const flat = { fee: flatFee, source: "flat" as const, courierName: null, etd: null };
+  const pin = options.deliveryPincode?.trim() ?? "";
+  if (rateSource !== "courier" || !/^[1-9]\d{5}$/.test(pin) || !integrations.shiprocket() || !env.shiprocket.pickupPincode) return flat;
+  try {
+    const grams = lines.reduce((n, l) => n + l.weightGrams * l.quantity, 0);
+    const s = await checkServiceability(pin, { weightKg: parcelWeightKg(grams), cod: options.paymentMethod === "cod", choice: courierChoice });
+    if (!s.courier) return flat;
+    return { fee: Math.ceil(s.courier.rate), source: "courier", courierName: s.courier.name, etd: s.courier.etd };
+  } catch (err) {
+    console.error("[pricing] courier rate lookup failed, using flat fee", err);
+    return flat;
+  }
 }

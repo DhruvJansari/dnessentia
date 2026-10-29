@@ -8,7 +8,13 @@ import { SectionHeading } from "@/components/section-heading";
 import { site } from "@/data/site";
 import { getAllSlugs, getAttarBySlug, getAttars, getComboBySlug, getCombos } from "@/lib/catalog";
 import type { Attar, Combo } from "@/data/types";
+import { Stars } from "@/components/stars";
+import { WishButton } from "@/components/wish-button";
+import type { Rating } from "@/data/types";
+import { getProductReviews } from "@/lib/catalog";
 import { Gallery } from "./gallery";
+import { PincodeCheck, ProductViewTracker, RecentlyViewed } from "./product-extras";
+import { ProductReviews } from "./reviews";
 import { AttarPurchase, ComboPurchase } from "./purchase";
 
 export async function generateStaticParams() {
@@ -89,22 +95,71 @@ function Details({ title, children, open = false }: { title: string; children: R
   );
 }
 
-function productJsonLd(name: string, image: string, description: string, low: number, high: number) {
-  return {
+type JsonLdInput = {
+  productId: number;
+  slug: string;
+  name: string;
+  image: string;
+  description: string;
+  low: number;
+  high: number;
+  inStock: boolean;
+  rating: Rating | null;
+  crumbs: { name: string; path: string }[];
+};
+
+/** Product + breadcrumb structured data, with ratings and recent reviews for Google rich results. */
+async function structuredData(p: JsonLdInput) {
+  const reviews = p.rating ? (await getProductReviews(p.productId)).slice(0, 5) : [];
+  const product = {
     "@context": "https://schema.org",
     "@type": "Product",
-    name,
-    image: `${site.url}${image}`,
-    description,
+    name: p.name,
+    image: `${site.url}${p.image}`,
+    description: p.description,
+    sku: p.slug,
     brand: { "@type": "Brand", name: site.name },
+    url: `${site.url}/product/${p.slug}`,
     offers: {
       "@type": "AggregateOffer",
       priceCurrency: "INR",
-      lowPrice: low,
-      highPrice: high,
-      availability: "https://schema.org/InStock",
+      lowPrice: p.low,
+      highPrice: p.high,
+      availability: p.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
     },
+    ...(p.rating
+      ? {
+          aggregateRating: { "@type": "AggregateRating", ratingValue: p.rating.average, reviewCount: p.rating.count, bestRating: 5 },
+          review: reviews.map((r) => ({
+            "@type": "Review",
+            author: { "@type": "Person", name: r.name },
+            datePublished: r.createdAt.slice(0, 10),
+            reviewRating: { "@type": "Rating", ratingValue: r.rating, bestRating: 5 },
+            reviewBody: r.body,
+          })),
+        }
+      : {}),
   };
+  const breadcrumbs = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: p.crumbs.map((c, i) => ({ "@type": "ListItem", position: i + 1, name: c.name, item: `${site.url}${c.path}` })),
+  };
+  return (
+    <>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(product) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbs) }} />
+    </>
+  );
+}
+
+function RatingLink({ rating }: { rating: Rating | null }) {
+  if (!rating) return null;
+  return (
+    <a href="#reviews" className="mt-3 inline-flex items-center gap-2 text-[13px] text-muted hover:text-ink">
+      <Stars value={rating.average} /> {rating.average.toFixed(1)} · {rating.count} review{rating.count === 1 ? "" : "s"}
+    </a>
+  );
 }
 
 async function AttarDetail({ attar }: { attar: Attar }) {
@@ -116,11 +171,27 @@ async function AttarDetail({ attar }: { attar: Attar }) {
   ];
   const related = attars.filter((a) => a.slug !== attar.slug).slice(0, 4);
   const families = attar.categories.filter((c) => !["Best Seller", "Signature"].includes(c));
-  const jsonLd = productJsonLd(attar.name, attar.image, attar.about, attar.sizes[0].price, attar.sizes.at(-1)!.price);
+  const jsonLd = await structuredData({
+    productId: attar.id,
+    slug: attar.slug,
+    name: attar.name,
+    image: attar.image,
+    description: attar.about,
+    low: attar.sizes[0].price,
+    high: attar.sizes.at(-1)!.price,
+    inStock: attar.sizes.some((s) => s.stock > 0),
+    rating: attar.rating,
+    crumbs: [
+      { name: "Home", path: "/" },
+      { name: "Attar", path: "/attar" },
+      { name: attar.name, path: `/product/${attar.slug}` },
+    ],
+  });
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      {jsonLd}
+      <ProductViewTracker slug={attar.slug} />
       <section className="container-x pb-16 pt-6 md:pb-24 md:pt-8">
         <Breadcrumbs items={[{ href: "/", label: "Home" }, { href: "/attar", label: "Attar" }, { label: attar.name }]} />
         <div className="mt-6 grid gap-10 md:mt-10 lg:grid-cols-2 lg:gap-16 xl:gap-24">
@@ -130,10 +201,13 @@ async function AttarDetail({ attar }: { attar: Attar }) {
             <p className="eyebrow">{families.join(" · ")}</p>
             <h1 className="mt-3 text-[3.25rem] leading-none sm:text-6xl lg:text-7xl">{attar.name}</h1>
             <p className="mt-3 text-[13px] uppercase tracking-[0.04em] text-muted">{attar.character}</p>
+            <RatingLink rating={attar.rating} />
             <p className="mt-6 max-w-lg leading-relaxed text-ink-soft">{attar.about}</p>
             <div className="mt-8">
               <AttarPurchase attar={attar} />
             </div>
+            <WishButton slug={attar.slug} withLabel className="mt-5 text-ink-soft hover:text-ink" />
+            <PincodeCheck />
             <Promises />
             <div className="mt-2">
               <Details title="Best For" open>
@@ -145,10 +219,11 @@ async function AttarDetail({ attar }: { attar: Attar }) {
                   apply on moisturised skin and let it settle naturally.
                 </p>
               </Details>
-              <Details title="Shipping & Returns">
+              <Details title="Shipping, Cancellation & Replacement">
                 <p className="text-ink-soft">
-                  Free shipping on orders above ₹{site.freeShippingThreshold}. Delivered in 3–7 business days. Damaged or
-                  wrong items are replaced. Just share your unboxing video within 3 days of delivery.
+                  Free shipping on orders above ₹{site.freeShippingThreshold}. Delivered in 3-7 business days. Cancel within 12 hours of
+                  ordering (50% charge on prepaid orders). No returns; damaged, leaked or wrong items are replaced if you share your
+                  unboxing video within 3 days of delivery.
                 </p>
               </Details>
             </div>
@@ -177,6 +252,8 @@ async function AttarDetail({ attar }: { attar: Attar }) {
         </div>
       </section>
 
+      <ProductReviews productId={attar.id} productName={attar.name} slug={attar.slug} rating={attar.rating} />
+
       <section className="section-y">
         <div className="container-x">
           <SectionHeading align="left" eyebrow="You may also like" title={<>More from the <em>collection</em></>} />
@@ -187,6 +264,7 @@ async function AttarDetail({ attar }: { attar: Attar }) {
           </div>
         </div>
       </section>
+      <RecentlyViewed currentSlug={attar.slug} />
     </>
   );
 }
@@ -194,10 +272,26 @@ async function AttarDetail({ attar }: { attar: Attar }) {
 async function ComboDetail({ combo }: { combo: Combo }) {
   const [attars, combos] = await Promise.all([getAttars(), getCombos()]);
   const related = combos.filter((c) => c.slug !== combo.slug).slice(0, 3);
-  const jsonLd = productJsonLd(combo.name, combo.image, combo.about, combo.price, combo.price);
+  const jsonLd = await structuredData({
+    productId: combo.id,
+    slug: combo.slug,
+    name: combo.name,
+    image: combo.image,
+    description: combo.about,
+    low: combo.price,
+    high: combo.price,
+    inStock: combo.stock > 0,
+    rating: combo.rating,
+    crumbs: [
+      { name: "Home", path: "/" },
+      { name: "Combo Collection", path: "/combo-collection" },
+      { name: combo.name, path: `/product/${combo.slug}` },
+    ],
+  });
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      {jsonLd}
+      <ProductViewTracker slug={combo.slug} />
       <section className="container-x pb-16 pt-6 md:pb-24 md:pt-8">
         <Breadcrumbs
           items={[{ href: "/", label: "Home" }, { href: "/combo-collection", label: "Combo Collection" }, { label: combo.name }]}
@@ -208,10 +302,13 @@ async function ComboDetail({ combo }: { combo: Combo }) {
           <div className="lg:py-4">
             <p className="eyebrow">{comboSummary(combo)}</p>
             <h1 className="mt-3 text-[3.25rem] leading-none sm:text-6xl lg:text-7xl">{combo.name}</h1>
+            <RatingLink rating={combo.rating} />
             <p className="mt-6 max-w-lg leading-relaxed text-ink-soft">{combo.about}</p>
             <div className="mt-8">
               <ComboPurchase combo={combo} attars={attars} />
             </div>
+            <WishButton slug={combo.slug} withLabel className="mt-5 text-ink-soft hover:text-ink" />
+            <PincodeCheck />
             <Promises />
             <div className="mt-2">
               <Details title="What's in the box" open>
@@ -231,6 +328,8 @@ async function ComboDetail({ combo }: { combo: Combo }) {
         </div>
       </section>
 
+      <ProductReviews productId={combo.id} productName={combo.name} slug={combo.slug} rating={combo.rating} />
+
       <section className="section-y bg-cream">
         <div className="container-x">
           <SectionHeading align="left" eyebrow="Explore more" title={<>Other <em>collections</em></>} />
@@ -241,6 +340,7 @@ async function ComboDetail({ combo }: { combo: Combo }) {
           </div>
         </div>
       </section>
+      <RecentlyViewed currentSlug={combo.slug} />
     </>
   );
 }

@@ -84,6 +84,7 @@ async function main() {
       code: "FREEGIFT",
       description: "Free 1ml attar sample on orders above ₹299",
       type: "free_gift",
+      giftSize: "1 ml",
       minOrder: 299,
     });
     console.log("Coupon FREEGIFT created");

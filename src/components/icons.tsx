@@ -223,3 +223,27 @@ export const SearchIcon = (p: IconProps) => (
     <path d="m20 20-4.2-4.2" />
   </Base>
 );
+
+export const HeartIcon = ({ filled, ...p }: IconProps & { filled?: boolean }) => (
+  <Base fill={filled ? "currentColor" : "none"} {...p}>
+    <path d="M12 20s-7.5-4.6-9.2-9.4C1.6 7.2 3.8 4 7.2 4c2 0 3.6 1.1 4.8 2.8C13.2 5.1 14.8 4 16.8 4c3.4 0 5.6 3.2 4.4 6.6C19.5 15.4 12 20 12 20Z" />
+  </Base>
+);
+
+export const SwapIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M4 8h13l-3.5-3.5M20 16H7l3.5 3.5" />
+  </Base>
+);
+
+export const ChatIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M4.5 5.5h15v10h-9l-4.5 3.5v-3.5h-1.5z" />
+  </Base>
+);
+
+export const StarOutlineIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.9L12 3.5Z" />
+  </Base>
+);

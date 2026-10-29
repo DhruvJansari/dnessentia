@@ -4,6 +4,8 @@ import type { Attar } from "@/data/types";
 import { formatPrice } from "@/lib/format";
 import { ArrowIcon } from "./icons";
 import { QuickAdd } from "./quick-add";
+import { Stars } from "./stars";
+import { WishButton } from "./wish-button";
 
 export function ProductCard({ attar, priority = false }: { attar: Attar; priority?: boolean }) {
   const from = attar.sizes[0];
@@ -39,6 +41,7 @@ export function ProductCard({ attar, priority = false }: { attar: Attar; priorit
           Discover <ArrowIcon className="size-3.5" />
         </span>
       </Link>
+        <WishButton slug={attar.slug} className="absolute right-3 top-3 z-10 size-9 rounded-full bg-ivory/90 backdrop-blur-sm" />
       <div className="flex flex-1 flex-col pt-4 sm:pt-5">
         <div className="flex items-start justify-between gap-3">
           <h3 className="text-[1.375rem] leading-tight sm:text-[1.625rem]">
@@ -49,6 +52,12 @@ export function ProductCard({ attar, priority = false }: { attar: Attar; priorit
           <QuickAdd attar={attar} />
         </div>
         <p className="mt-1 text-[12px] tracking-wide text-muted sm:text-[13px]">{attar.character}</p>
+        {attar.rating && (
+          <p className="mt-1.5 flex items-center gap-1.5 text-[12px] text-muted">
+            <Stars value={attar.rating.average} />
+            {attar.rating.average.toFixed(1)} ({attar.rating.count})
+          </p>
+        )}
         <p className="mt-2 text-sm">
           <span className="text-muted">From </span>
           <span className="font-medium">{formatPrice(from.price)}</span>

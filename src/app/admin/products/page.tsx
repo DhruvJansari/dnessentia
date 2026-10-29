@@ -80,16 +80,26 @@ async function ProductTable({ searchParams }: { searchParams: PageProps<"/admin/
                 <Td className="capitalize text-stone-600">{p.type}</Td>
                 <Td>
                   <div className="flex flex-wrap gap-1.5">
-                    {p.variants.map((v) => (
-                      <span
-                        key={v.id}
-                        className={`rounded-md px-2 py-1 text-[12px] ring-1 ring-inset ${
-                          !v.isActive ? "text-stone-400 ring-stone-200 line-through" : v.stock <= 0 ? "bg-red-50 text-red-800 ring-red-200" : v.stock <= low ? "bg-amber-50 text-amber-800 ring-amber-200" : "ring-stone-200"
-                        }`}
-                      >
-                        {v.label} · {inr(v.price)} · {v.stock}
-                      </span>
-                    ))}
+                    {p.variants.map((v) => {
+                      const tone = !v.isActive
+                        ? "border-stone-200 bg-stone-50 text-stone-400"
+                        : v.stock <= 0
+                          ? "border-red-200 bg-red-50 text-red-800"
+                          : v.stock <= low
+                            ? "border-amber-200 bg-amber-50 text-amber-900"
+                            : "border-stone-200 bg-white text-stone-700";
+                      return (
+                        <span key={v.id} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] leading-none ${tone}`}>
+                          <span className="font-medium">{v.label}</span>
+                          <span className="text-stone-400">·</span>
+                          <span>{inr(v.price)}</span>
+                          <span className="text-stone-400">·</span>
+                          <span className={v.stock <= low ? "font-medium" : "text-stone-500"}>
+                            {!v.isActive ? "off" : v.stock <= 0 ? "sold out" : `${v.stock} left`}
+                          </span>
+                        </span>
+                      );
+                    })}
                   </div>
                 </Td>
                 <Td>

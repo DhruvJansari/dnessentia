@@ -1,5 +1,5 @@
 import "server-only";
-import { and, count, desc, eq, gte, inArray, like, lte, or, sql, sum, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, like, lt, lte, or, sql, sum, type SQL } from "drizzle-orm";
 import { auditLogs, db, orders, products, productVariants, users, type OrderStatus } from "@/db";
 import { getSettings } from "../settings";
 
@@ -16,17 +16,29 @@ async function revenueSince(from: Date) {
   const [row] = await db
     .select({ revenue: sum(orders.total), n: count() })
     .from(orders)
-    .where(and(gte(orders.createdAt, from), inArray(orders.status, revenueStatuses)));
+    .where(and(gte(orders.createdAt, from), inArray(orders.status, revenueStatuses), eq(orders.kind, "standard")));
   return { revenue: Number(row?.revenue ?? 0), orders: row?.n ?? 0 };
 }
 
-export async function getDashboard() {
+async function revenueBetween(from: Date, to: Date) {
+  const [row] = await db
+    .select({ revenue: sum(orders.total), n: count() })
+    .from(orders)
+    .where(and(gte(orders.createdAt, from), lt(orders.createdAt, to), inArray(orders.status, revenueStatuses), eq(orders.kind, "standard")));
+  return { revenue: Number(row?.revenue ?? 0), orders: row?.n ?? 0 };
+}
+
+export async function getDashboard(rangeDays: 7 | 30 | 90 = 30) {
   const today = startOfTodayIST();
   const d7 = new Date(today.getTime() - 6 * 864e5);
   const d30 = new Date(today.getTime() - 29 * 864e5);
+  const rangeStart = new Date(today.getTime() - (rangeDays - 1) * 864e5);
+  const prevStart = new Date(rangeStart.getTime() - rangeDays * 864e5);
   const settings = await getSettings();
 
-  const [todayStats, weekStats, monthStats, daily, byStatus, awaitingPayment, lowStock, recent, activity, customers] = await Promise.all([
+  const [rangeStats, prevStats, todayStats, weekStats, monthStats, daily, byStatus, awaitingPayment, lowStock, recent, activity, customers] = await Promise.all([
+    revenueSince(rangeStart),
+    revenueBetween(prevStart, rangeStart),
     revenueSince(today),
     revenueSince(d7),
     revenueSince(d30),
@@ -37,7 +49,7 @@ export async function getDashboard() {
         n: count(),
       })
       .from(orders)
-      .where(and(gte(orders.createdAt, d30), inArray(orders.status, revenueStatuses)))
+      .where(and(gte(orders.createdAt, rangeStart), inArray(orders.status, revenueStatuses), eq(orders.kind, "standard")))
       .groupBy(sql`day`),
     db.select({ status: orders.status, n: count() }).from(orders).groupBy(orders.status),
     db
@@ -56,16 +68,17 @@ export async function getDashboard() {
     db.select({ n: count() }).from(users).where(eq(users.role, "customer")),
   ]);
 
-  // Fill missing days so the chart has 30 evenly spaced bars.
+  // Fill missing days so every day in the range has a point.
   const map = new Map(daily.map((d) => [d.day, { revenue: Number(d.revenue ?? 0), orders: d.n }]));
-  const chart = Array.from({ length: 30 }, (_, i) => {
-    const date = new Date(d30.getTime() + i * 864e5 + IST_OFFSET_MS);
+  const chart = Array.from({ length: rangeDays }, (_, i) => {
+    const date = new Date(rangeStart.getTime() + i * 864e5 + IST_OFFSET_MS);
     const key = date.toISOString().slice(0, 10);
     return { day: key, ...(map.get(key) ?? { revenue: 0, orders: 0 }) };
   });
 
   const statusCounts = Object.fromEntries(byStatus.map((s) => [s.status, s.n])) as Partial<Record<OrderStatus, number>>;
   return {
+    range: { days: rangeDays, ...rangeStats, previous: prevStats },
     today: todayStats,
     week: weekStats,
     month: monthStats,
@@ -113,8 +126,10 @@ export async function listOrders(f: OrderFilters) {
   return { rows, total: n, page, pages: Math.max(1, Math.ceil(n / PAGE_SIZE)), byStatus: Object.fromEntries(byStatus.map((s) => [s.status, s.n])) };
 }
 
-export async function listCustomers(q: string | undefined, page: number) {
+export async function listCustomers(q: string | undefined, page: number, role: "all" | "customer" | "team" = "all") {
   const where: SQL[] = [];
+  if (role === "customer") where.push(eq(users.role, "customer"));
+  if (role === "team") where.push(inArray(users.role, ["staff", "admin"]));
   if (q) {
     const like_ = `%${q.trim()}%`;
     where.push(or(like(users.email, like_), like(users.name, like_), like(users.phone, like_))!);

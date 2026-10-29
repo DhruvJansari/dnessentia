@@ -3,68 +3,54 @@ import { ContactCard } from "@/components/contact-card";
 import { ProsePage } from "@/components/prose-page";
 
 export const metadata: Metadata = {
-  title: "Refund & Return Policy",
-  description: "Returns, replacements, refunds and cancellations at DN Essentia.",
+  title: "Cancellation, Replacement & Refund Policy",
+  description: "Cancel within 12 hours (50% charge on prepaid orders). No returns; damaged, leaked, wrong or missing products are replaced.",
 };
 
 export default function RefundReturnsPage() {
   return (
     <ProsePage
-      title="Returns & Refunds"
+      title="Cancellation & Replacement"
       eyebrow="Customer Care"
-      updated="May 2026"
-      intro="We strive to provide premium-quality fragrance and excellent service. If something isn't right with your order, here's how we'll make it right."
+      updated="October 2026"
+      intro="We want every bottle to reach you perfect. Here's exactly what happens if you change your mind before dispatch, or if something arrives wrong."
       sections={[
         {
-          heading: "Eligible return reasons",
-          body: ["You may request a return or replacement if:"],
+          heading: "Cancelling an order",
           list: [
-            "You received a damaged or leaked product",
-            "You received the wrong product",
-            "The product significantly differs from the description on the website",
-            "You received the wrong size or variant",
-            "You are not satisfied with the fragrance product received",
+            "Cancel from your order page (or the link in your confirmation email) within 12 hours of ordering, before the order is dispatched.",
+            "Prepaid orders: a 50% cancellation charge applies, and the other 50% is refunded to your original payment method within 5-7 business days.",
+            "Unpaid orders and Cash on Delivery orders cancel at no charge within the same window.",
+            "Once an order is dispatched it can't be cancelled.",
           ],
         },
         {
-          heading: "Unboxing video required",
+          heading: "No returns",
           body: [
-            "For complaints about damaged products, empty packages, missing items or leakage during delivery, please provide a clear unboxing video of the package. Without it, your complaint may not be accepted.",
+            "Because attars are personal-care products, we don't accept returns or offer refunds on delivered orders, including for change of mind or fragrance preference.",
           ],
         },
         {
-          heading: "Non-returnable products",
+          heading: "Replacement for damaged, leaked, wrong or missing items",
           list: [
-            "Used or opened products",
-            "Products with broken seals",
-            "Customised or personalised products",
-            "Products purchased during sale or discount offers",
-            "Consumable products once opened",
+            "Request a replacement from your order page within 3 days of delivery.",
+            "Choose the affected products, tell us what happened and share a clear unboxing video link (required for damage, leakage and missing items) and photos.",
+            "We review every request within 1-2 business days and email you the decision.",
+            "Approved requests get a replacement of the product, shipped free. Delivery and packaging charges of the original order are not refundable.",
           ],
         },
         {
-          heading: "Return conditions",
+          heading: "Not eligible",
           list: [
-            "Products must be unused and in original condition",
-            "Original packaging, labels and tags must remain intact",
-            "Return requests must be made within 3 days of delivery",
-            "Approved returns must be shipped back within 7 days",
-            "Replacement products are subject to stock availability",
+            "Used or opened products, unless they arrived damaged or leaked",
+            "Requests made more than 3 days after delivery",
+            "Damage or leakage claims without an unboxing video",
           ],
         },
         {
-          heading: "Refund process",
+          heading: "Refund timelines",
           body: [
-            "To request a refund or raise a dispute, contact us with your order ID, product images or videos, and a detailed explanation of the issue. Refunds are processed only after product verification and approval by our support team.",
-          ],
-        },
-        {
-          heading: "Cancellation policy",
-          list: [
-            "Orders cannot be cancelled after 12 hours of placing the order",
-            "Customised orders cannot be cancelled",
-            "Orders can only be cancelled before dispatch",
-            "DN Essentia reserves the right to cancel orders due to pricing errors or stock unavailability",
+            "Refunds from cancellations are issued through Razorpay to the original payment method. Banks usually credit them within 5-7 business days.",
           ],
         },
       ]}

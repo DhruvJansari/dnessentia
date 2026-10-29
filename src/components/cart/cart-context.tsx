@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { track } from "../analytics";
 
 export type CartItem = {
   /** Unique per product + variant + selection, so the same attar in two sizes stays as two lines. */
@@ -69,6 +70,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   const add = useCallback<CartContextValue["add"]>((item, qty = 1) => {
     const key = itemKey(item);
+    track("add_to_cart", { value: item.price * qty, items: [{ item_id: item.slug, item_name: item.name, item_variant: item.variant, price: item.price, quantity: qty }] });
     setItems((prev) => {
       const existing = prev.find((i) => i.key === key);
       if (existing) return prev.map((i) => (i.key === key ? { ...i, qty: i.qty + qty } : i));

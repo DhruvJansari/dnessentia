@@ -1,7 +1,7 @@
 import { inArray } from "drizzle-orm";
 import Link from "next/link";
 import { Suspense } from "react";
-import { CopyField, SettingsForm, TestButton } from "@/components/admin/settings-forms";
+import { CopyField, MaintenanceButton, SettingsForm, TestButton } from "@/components/admin/settings-forms";
 import { Card, PageTitle, Skeleton } from "@/components/admin/ui";
 import { db, users } from "@/db";
 import { requireAdmin } from "@/lib/auth/session";
@@ -45,7 +45,30 @@ async function Settings() {
             section="shipping"
             fields={[
               { name: "freeShippingThreshold", label: "Free shipping above", type: "number", value: s.shipping.freeShippingThreshold, suffix: "₹" },
-              { name: "flatFee", label: "Shipping fee below that", type: "number", value: s.shipping.flatFee, suffix: "₹" },
+              {
+                name: "rateSource",
+                label: "Shipping fee below that",
+                type: "select",
+                value: s.shipping.rateSource,
+                options: [
+                  { value: "courier", label: "Live courier rate from Shiprocket" },
+                  { value: "flat", label: "Flat fee" },
+                ],
+                hint: "Live rates depend on the customer's PIN code and parcel weight.",
+              },
+              { name: "flatFee", label: "Flat fee", type: "number", value: s.shipping.flatFee, suffix: "₹", hint: "Also used when Shiprocket can't quote a rate." },
+              {
+                name: "courierChoice",
+                label: "Courier to quote and book",
+                type: "select",
+                value: s.shipping.courierChoice,
+                options: [
+                  { value: "cheapest", label: "Cheapest courier" },
+                  { value: "fastest", label: "Fastest courier" },
+                  { value: "recommended", label: "Shiprocket's recommendation" },
+                ],
+                hint: "Create shipment books this same courier, so what customers pay matches your Shiprocket charge.",
+              },
             ]}
           />
         </Card>
@@ -69,6 +92,42 @@ async function Settings() {
               { name: "packageHeightCm", label: "Default box height", type: "number", value: s.fulfilment.packageHeightCm, suffix: "cm" },
             ]}
           />
+        </Card>
+        <Card title="Business details (invoices & Contact page)">
+          <SettingsForm
+            section="business"
+            fields={[
+              { name: "legalName", label: "Legal / trade name", type: "text", value: s.business.legalName },
+              { name: "gstin", label: "GSTIN", type: "text", value: s.business.gstin, hint: "Leave empty if not GST-registered; invoices then show \"Invoice\" instead of \"Tax invoice\"." },
+              { name: "addressLine1", label: "Address line 1", type: "text", value: s.business.addressLine1 },
+              { name: "addressLine2", label: "Address line 2", type: "text", value: s.business.addressLine2 },
+              { name: "city", label: "City", type: "text", value: s.business.city },
+              { name: "state", label: "State", type: "text", value: s.business.state, hint: "Orders to this state get CGST + SGST; others get IGST." },
+              { name: "pincode", label: "PIN code", type: "text", value: s.business.pincode },
+              { name: "hsn", label: "HSN code for attars", type: "text", value: s.business.hsn },
+              { name: "gstRate", label: "GST rate", type: "number", value: s.business.gstRate, suffix: "%" },
+              { name: "invoicePrefix", label: "Invoice number prefix", type: "text", value: s.business.invoicePrefix, hint: "Invoices look like DN/2026-27/0001." },
+            ]}
+          />
+        </Card>
+        <Card title="Policies">
+          <SettingsForm
+            section="policies"
+            fields={[
+              { name: "cancellationWindowHours", label: "Customers can cancel within", type: "number", value: s.policies.cancellationWindowHours, suffix: "hours" },
+              { name: "cancellationChargePercent", label: "Cancellation charge on prepaid orders", type: "number", value: s.policies.cancellationChargePercent, suffix: "%" },
+              { name: "replacementWindowDays", label: "Replacement requests allowed for", type: "number", value: s.policies.replacementWindowDays, suffix: "days" },
+              { name: "paymentReminderAfterHours", label: "Send unpaid-order reminder after", type: "number", value: s.policies.paymentReminderAfterHours, suffix: "hours" },
+              { name: "pendingPaymentExpiryHours", label: "Cancel unpaid online orders after", type: "number", value: s.policies.pendingPaymentExpiryHours, suffix: "hours" },
+            ]}
+          />
+          <div className="mt-5 border-t border-stone-100 pt-4 text-sm">
+            <p className="font-medium">Reminders & expiry job</p>
+            <p className="mt-1 text-stone-500">Runs automatically when your server calls the cron URL every 15 minutes (see README). You can also run it now.</p>
+            <div className="mt-3">
+              <MaintenanceButton />
+            </div>
+          </div>
         </Card>
         <Card title="Store">
           <SettingsForm

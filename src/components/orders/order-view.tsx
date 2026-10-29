@@ -4,7 +4,24 @@ import type { orderEvents, orderItems, orders } from "@/db";
 import { formatPrice } from "@/lib/format";
 import { publicTrackingUrl } from "@/lib/shiprocket";
 import { CheckIcon } from "../icons";
+import { CancelOrder, ReplacementForm } from "./after-sales";
+import { PurchaseTracker } from "./purchase-tracker";
+import { describeEvents } from "@/lib/orders/describe-event";
 import { RetryPayment } from "./retry-payment";
+import type { replacementRequests } from "@/db";
+
+type AfterSales = {
+  cancel: { charge: number; refund: number; prepaid: boolean; chargePercent: number; deadline: string | null } | null;
+  replacement: { canRequest: boolean; windowDays: number; requests: (typeof replacementRequests.$inferSelect)[] };
+  hasInvoice: boolean;
+};
+
+const requestStatus: Record<string, string> = {
+  requested: "Under review",
+  approved: "Approved, replacement on the way",
+  rejected: "Declined",
+  completed: "Replacement delivered",
+};
 
 type Order = typeof orders.$inferSelect & { items: (typeof orderItems.$inferSelect)[] };
 type Event = typeof orderEvents.$inferSelect;
@@ -45,12 +62,14 @@ export function OrderView({
   accessKey,
   thanks,
   isGuest,
+  afterSales,
 }: {
   order: Order;
   events: Event[];
   accessKey: string;
   thanks: boolean;
   isGuest: boolean;
+  afterSales: AfterSales;
 }) {
   const current = stepIndex(order);
   const awaitingPayment = order.status === "pending" && order.paymentMethod === "razorpay" && order.paymentStatus !== "paid";
@@ -84,7 +103,42 @@ export function OrderView({
               : `We've emailed the details to ${order.email}. You'll get another email when it ships.`}
         </p>
         {awaitingPayment && <RetryPayment orderNumber={order.orderNumber} accessKey={accessKey} amount={order.total} />}
+        {thanks && order.status !== "pending" && order.kind === "standard" && (
+          <PurchaseTracker
+            orderNumber={order.orderNumber}
+            value={order.total}
+            items={order.items.map((i) => ({ id: String(i.productId), name: i.name, variant: i.variantLabel, price: i.unitPrice, qty: i.quantity }))}
+          />
+        )}
+        {order.kind === "replacement" && <p className="mt-3 text-sm text-gold">This is a free replacement shipment.</p>}
       </div>
+
+      {(afterSales.cancel || afterSales.hasInvoice) && (
+        <div className="reveal flex flex-wrap items-center gap-x-6 gap-y-3">
+          {afterSales.hasInvoice && (
+            <a href={`/invoice/${order.orderNumber}?key=${accessKey}`} target="_blank" className="btn btn-outline h-11">
+              Download invoice
+            </a>
+          )}
+          {afterSales.cancel && (
+            <CancelOrder
+              orderNumber={order.orderNumber}
+              accessKey={accessKey}
+              charge={afterSales.cancel.charge}
+              refund={afterSales.cancel.refund}
+              chargePercent={afterSales.cancel.chargePercent}
+              deadline={afterSales.cancel.deadline}
+              prepaid={afterSales.cancel.prepaid}
+            />
+          )}
+        </div>
+      )}
+      {order.status === "cancelled" && order.refundedAmount > 0 && (
+        <p className="reveal border border-line bg-white px-4 py-3 text-sm">
+          Refund of <strong>{formatPrice(order.refundedAmount)}</strong> issued
+          {order.cancellationCharge > 0 && <> (cancellation charge {formatPrice(order.cancellationCharge)})</>}. It reaches your account in 5-7 business days.
+        </p>
+      )}
 
       <dl className="reveal grid grid-cols-2 gap-px overflow-hidden border border-line bg-line sm:grid-cols-4">
         {[
@@ -151,7 +205,7 @@ export function OrderView({
                   </span>
                   {i.selections?.length ? <span className="block text-[12px] text-muted">{i.selections.join(" · ")}</span> : null}
                 </span>
-                <span className="text-sm">{formatPrice(i.lineTotal)}</span>
+                <span className="text-sm">{i.isGift ? <span className="text-gold">Free</span> : order.kind === "replacement" ? "Replacement" : formatPrice(i.lineTotal)}</span>
               </li>
             ))}
           </ul>
@@ -185,18 +239,41 @@ export function OrderView({
             <div className="reveal">
               <h2 className="text-3xl">Updates</h2>
               <ol className="mt-4 space-y-4 border-l border-line pl-5">
-                {events.map((e) => (
-                  <li key={e.id} className="relative text-sm">
-                    <span aria-hidden className="absolute -left-[25px] top-1.5 size-2.5 rounded-full border-2 border-ivory bg-gold" />
-                    <p>{e.message}</p>
-                    <p className="text-[12px] text-muted">{dateFmt.format(e.createdAt)}</p>
-                  </li>
-                ))}
+                {describeEvents(events)
+                  .filter((e) => !e.routine)
+                  .map((e) => (
+                    <li key={e.id} className="relative text-sm">
+                      <span aria-hidden className="absolute -left-[25px] top-1.5 size-2.5 rounded-full border-2 border-ivory bg-gold" />
+                      <p className="font-medium">{e.title}</p>
+                      {e.detail && <p className="text-ink-soft">{e.detail}</p>}
+                      <p className="text-[12px] text-muted">{dateFmt.format(new Date(e.at))}</p>
+                    </li>
+                  ))}
               </ol>
             </div>
           )}
         </div>
       </div>
+
+      {(afterSales.replacement.canRequest || afterSales.replacement.requests.length > 0) && (
+        <div className="reveal space-y-4">
+          <h2 className="text-3xl">Problem with your order?</h2>
+          {afterSales.replacement.requests.map((r) => (
+            <div key={r.id} className="border border-line bg-white px-4 py-3 text-sm">
+              <p className="font-medium">Replacement request: {requestStatus[r.status]}</p>
+              {r.adminNote && <p className="mt-1 text-ink-soft">{r.adminNote}</p>}
+            </div>
+          ))}
+          {afterSales.replacement.canRequest && (
+            <ReplacementForm
+              orderNumber={order.orderNumber}
+              accessKey={accessKey}
+              windowDays={afterSales.replacement.windowDays}
+              items={order.items.filter((i) => !i.isGift).map((i) => ({ id: i.id, name: i.name, variantLabel: i.variantLabel, quantity: i.quantity }))}
+            />
+          )}
+        </div>
+      )}
 
       {isGuest && (
         <div className="reveal flex flex-col gap-4 bg-sand p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">

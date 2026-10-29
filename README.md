@@ -29,7 +29,13 @@ Log in at `/login` with `ADMIN_EMAIL` / `ADMIN_PASSWORD` from `.env.local`, then
 | `RAZORPAY_WEBHOOK_SECRET` | Secret you set on the Razorpay webhook. |
 | `SHIPROCKET_EMAIL`, `SHIPROCKET_PASSWORD` | A Shiprocket **API user** (Settings → API → Create API User), not your main login. |
 | `SHIPROCKET_PICKUP_LOCATION` | Pickup location nickname exactly as in Shiprocket (default `Primary`). |
+| `SHIPROCKET_PICKUP_PINCODE` | PIN code of the pickup address. Powers the "Delivers by" check at checkout and on product pages. |
 | `SHIPROCKET_WEBHOOK_TOKEN` | Token you set on the Shiprocket tracking webhook. |
+| `CRON_SECRET` | Protects `/api/cron/maintenance` (payment reminders and expiry of unpaid orders). |
+| `NEXT_PUBLIC_GA_MEASUREMENT_ID` | Google Analytics 4 measurement ID (`G-…`). Empty = no tracking. |
+| `NEXT_PUBLIC_GSC_VERIFICATION` | Google Search Console HTML-tag verification code. |
+
+**Email deliverability:** add SPF and DKIM records for dnessentia.com from your email provider, or order emails may land in spam.
 
 Admin → Settings shows which integrations are configured and has "Send test email" / "Test connection" buttons.
 
@@ -44,6 +50,27 @@ Admin → Settings shows which integrations are configured and has "Send test em
 
 COD exists but is **off by default** (the current site is Razorpay-only). Toggle it in Admin → Settings → Payments.
 
+### After the order
+
+- **Invoices**: every confirmed order gets a sequential GST invoice number (`DN/2026-27/0001`). Customers download it from their order page; staff open it from the admin order. CGST + SGST within your state, IGST otherwise. Fill Admin → Settings → Business (GSTIN, address) before going live.
+- **Cancellation**: customers can cancel within 12 hours, before dispatch. Prepaid orders keep a 50% cancellation charge and the rest is refunded through Razorpay automatically; COD and unpaid orders cancel free. Admins can also cancel with a full, policy or no refund.
+- **No returns, replacement only**: within 3 days of delivery, customers report damaged / leaked / wrong / missing items with photos and an unboxing video link. Approving creates a free replacement order that ships like any other. Delivery and packaging charges are not refunded.
+- **Unpaid orders**: a reminder email goes out after 1 hour; still-unpaid online orders are cancelled after 24 hours. All windows and percentages are editable in Admin → Settings → Policies.
+
+### Scheduled job
+
+Add this to the server's crontab so reminders and expiry run every 15 minutes:
+
+```
+*/15 * * * * curl -s -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" https://dnessentia.com/api/cron/maintenance
+```
+
+Admin → Settings → Policies also has a **Run now** button.
+
+### Storefront extras
+
+Product reviews (verified buyers publish instantly, others are moderated), instant search (header icon or the `/` key), wishlist (saved to the account when logged in), recently viewed, 1 ml sample suggestions in the bag, FREEGIFT adds the chosen sample as a ₹0 line, GA4 e-commerce events (view_item, add_to_cart, begin_checkout, purchase, search, add_to_wishlist), product + breadcrumb + organization structured data, Contact page with inbox, Terms & Conditions.
+
 ## Webhooks to configure
 
 | Service | URL | Events / notes |
@@ -55,17 +82,20 @@ Every webhook received is logged under Admin → Activity → Webhooks.
 
 ## Admin panel (`/admin`)
 
-- **Dashboard**: revenue (today / 7 / 30 days), chart, orders by status, ready-to-ship, low stock, latest activity.
-- **Orders**: search and filter; detail page with items, customer, payment, shipment, status changes, refunds, notes, email resend, and a full **timeline** of everything that happened.
+- **Dashboard**: revenue with a 7 / 30 / 90-day chart and change vs the previous period, orders by status, ready-to-ship, low stock, latest activity.
+- **Orders**: search, filter and **CSV export with GST split**; detail page with items, customer, payment, shipment (create, sync, **print label**), invoice, status changes, cancel with refund choice, refunds, notes, email resend, replacement requests, and a plain-language **timeline** grouped by day.
+- **Replacements**: every damaged / leaked / wrong / missing report, with photos and video links; approve or reject.
+- **Reviews**: approve, hide, reply to or delete product reviews.
+- **Messages**: inbox for the Contact page.
 - **Products**: edit content, images (upload), variants, prices, MRP, stock, weight; publish/hide; best sellers. Saves go live on the store immediately.
-- **Customers**: order history, lifetime spend, addresses, disable account, send reset / verification email, change role.
+- **Users**: customers and team, add a user (they get a set-password email), edit name / email / phone, change role, signed-in devices and "sign out everywhere", mark verified, disable, CSV export.
 - **Coupons**: % off, ₹ off or free gift; minimum order, usage limit, start/end dates.
 - **Emails**: every email sent, failed or skipped.
 - **Activity**: audit log of every admin change (who, what, when, IP, before/after) and every webhook.
-- **Settings**: shipping fee, free-shipping threshold, COD, auto-shipment, box size, notifications, store info, integration status, team.
+- **Settings**: shipping fee, free-shipping threshold, COD, auto-shipment, box size, notifications, **business details for invoices**, **policies** (cancellation, replacement, unpaid-order timers), store info, integration status, team.
 
 Roles: **admin** (everything), **staff** (orders, products, customers, but not settings, coupons, roles or refunds), **customer**.
-Make someone staff: they register, then an admin opens them under Customers and changes the role, or run `npm run admin:create -- email "password" staff`.
+Add staff from Admin → Users → Add a user (role Staff), or change an existing user's role, or run `npm run admin:create -- email "password" staff`.
 
 ## Scripts
 

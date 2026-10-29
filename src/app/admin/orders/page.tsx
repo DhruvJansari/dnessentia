@@ -11,7 +11,23 @@ export const metadata = { title: "Orders" };
 export default function OrdersPage({ searchParams }: PageProps<"/admin/orders">) {
   return (
     <>
-      <PageTitle title="Orders" description="Every order, its payment and its shipment. Click an order to manage it." />
+      <PageTitle
+        title="Orders"
+        description="Every order, its payment and its shipment. Click an order to manage it."
+        actions={
+          <form action="/admin/export/orders" className="flex flex-wrap items-end gap-2">
+            <label className="text-[12px] text-stone-500">
+              From
+              <input type="date" name="from" className={`${input} mt-1 w-auto`} />
+            </label>
+            <label className="text-[12px] text-stone-500">
+              To
+              <input type="date" name="to" className={`${input} mt-1 w-auto`} />
+            </label>
+            <button className={btn.secondary}>Export CSV</button>
+          </form>
+        }
+      />
       <Suspense fallback={<Skeleton rows={1} />}>
         <OrdersTable searchParams={searchParams} />
       </Suspense>
