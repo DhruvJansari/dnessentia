@@ -27,7 +27,7 @@ function layout(preheader: string, body: string) {
 </td></tr>
 <tr><td style="background:#ffffff;border:1px solid ${C.line};padding:32px 28px;">${body}</td></tr>
 <tr><td align="center" style="padding:24px 8px;font-size:12px;line-height:1.6;color:${C.muted};">
-  Premium alcohol-free attars · <a href="${env.appUrl}" style="color:${C.muted};">dnessentia.com</a><br>
+  Premium alcohol-free attars · <a href="${env.appUrl}" style="color:${C.muted};">${new URL(env.appUrl).host}</a><br>
   Questions? Reply to this email or WhatsApp us on +91 92747 00645.
 </td></tr>
 </table></td></tr></table></body></html>`;
@@ -89,6 +89,20 @@ export function verifyEmailTemplate(name: string, link: string): Email {
         small("This link expires in 48 hours. If you didn't create an account, you can ignore this email."),
     ),
     text: `Welcome to DN Essentia. Confirm your email: ${link}`,
+  };
+}
+
+export function accountCreatedTemplate(name: string, link: string, expiresInDays: number): Email {
+  return {
+    subject: "Your DN Essentia account is ready",
+    html: layout(
+      "Set your password to finish creating your account",
+      heading(`Welcome${name ? `, ${esc(name.split(" ")[0])}` : ""}`) +
+        para("We created your DN Essentia account with your order. Set a password to log in any time, track your orders and check out faster.") +
+        button(link, "Set your password") +
+        small(`This link works once and expires in ${expiresInDays} days. Later, you can always set a new password from Forgot password on the login page.`),
+    ),
+    text: `Welcome to DN Essentia. Set your password: ${link} (expires in ${expiresInDays} days)`,
   };
 }
 

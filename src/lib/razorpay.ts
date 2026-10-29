@@ -47,6 +47,12 @@ export function fetchPayment(paymentId: string) {
   return call<RazorpayPayment>(`/payments/${paymentId}`);
 }
 
+/** Every payment attempt made against a Razorpay order (used to confirm payments without a webhook). */
+export async function fetchOrderPayments(razorpayOrderId: string) {
+  const body = await call<{ items: RazorpayPayment[] }>(`/orders/${razorpayOrderId}/payments`);
+  return body.items ?? [];
+}
+
 export function refundPayment(paymentId: string, amountRupees?: number) {
   return call<{ id: string; amount: number; status: string }>(`/payments/${paymentId}/refund`, {
     method: "POST",

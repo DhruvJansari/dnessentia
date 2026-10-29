@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db, users } from "@/db";
 import { audit, diff } from "@/lib/audit";
-import { markEmailVerified, sendPasswordResetEmail, sendVerificationEmail } from "@/lib/auth/accounts";
+import { markEmailVerified, sendPasswordResetEmail, sendSetPasswordEmail, sendVerificationEmail } from "@/lib/auth/accounts";
 import { hashPassword } from "@/lib/auth/password";
 import { emailField, fieldErrors, phoneField, type FormState } from "@/lib/validation";
 import { destroyAllSessions, requireAdmin, requireStaff } from "@/lib/auth/session";
@@ -100,7 +100,7 @@ export async function createUserAction(_: FormState, formData: FormData): Promis
     role: parsed.data.role,
     passwordHash: await hashPassword(randomBytes(24).toString("base64url")),
   });
-  const status = await sendPasswordResetEmail({ id: res.insertId, email: parsed.data.email });
+  const status = await sendSetPasswordEmail({ id: res.insertId, email: parsed.data.email, name: parsed.data.name });
   await audit({ actor, action: "user.create", entityType: "user", entityId: res.insertId, summary: `Created ${parsed.data.role} ${parsed.data.email}` });
   revalidatePath("/admin/customers");
   return {

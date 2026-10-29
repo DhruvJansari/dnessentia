@@ -11,6 +11,7 @@ import {
   consumeToken,
   createCustomer,
   findUserByEmail,
+  markEmailVerified,
   sendPasswordResetEmail,
   sendVerificationEmail,
 } from "./accounts";
@@ -92,6 +93,8 @@ export async function resetPasswordAction(_: FormState, formData: FormData): Pro
   const userId = await consumeToken(parsed.data.token, "password_reset");
   if (!userId) return { error: "This reset link is invalid or has expired. Request a new one." };
   await db.update(users).set({ passwordHash: await hashPassword(parsed.data.password) }).where(eq(users.id, userId));
+  // The link was emailed, so using it proves the address: verify it (and attach earlier guest orders).
+  await markEmailVerified(userId);
   await destroyAllSessions(userId);
   await createSession(userId);
   redirect("/account?reset=1");

@@ -1,25 +1,29 @@
 import "server-only";
+import { randomBytes } from "node:crypto";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { authTokens, db, orders, users } from "@/db";
 import { orderEvent } from "../audit";
 import { env } from "../env";
 import { sendMail } from "../mail/send";
-import { passwordResetTemplate, verifyEmailTemplate } from "../mail/templates";
+import { accountCreatedTemplate, passwordResetTemplate, verifyEmailTemplate } from "../mail/templates";
 import { hashToken, newToken } from "../tokens";
 import { hashPassword } from "./password";
 
 type Purpose = "password_reset" | "verify_email";
 
+const SET_PASSWORD_TTL_DAYS = 7;
+
 export async function findUserByEmail(email: string) {
   return db.query.users.findFirst({ where: eq(users.email, email.toLowerCase().trim()) });
 }
 
-export async function createCustomer(data: { email: string; name: string; phone?: string | null; password: string }) {
+/** Without a password (e.g. "Create an account" at checkout) a random one is set; the customer chooses their own via sendSetPasswordEmail. */
+export async function createCustomer(data: { email: string; name: string; phone?: string | null; password?: string }) {
   const [res] = await db.insert(users).values({
     email: data.email.toLowerCase().trim(),
     name: data.name,
     phone: data.phone ?? null,
-    passwordHash: await hashPassword(data.password),
+    passwordHash: await hashPassword(data.password ?? randomBytes(24).toString("base64url")),
     role: "customer",
   });
   return res.insertId;
@@ -52,6 +56,13 @@ export async function sendPasswordResetEmail(user: { id: number; email: string }
   const token = await issueToken(user.id, "password_reset", 3600e3);
   const link = `${env.appUrl}/reset-password?token=${token}`;
   return sendMail({ ...passwordResetTemplate(link), to: user.email, template: "password_reset", userId: user.id });
+}
+
+/** Welcome email for accounts created without a password (checkout, admin). The link sets the password and verifies the email. */
+export async function sendSetPasswordEmail(user: { id: number; email: string; name: string }) {
+  const token = await issueToken(user.id, "password_reset", SET_PASSWORD_TTL_DAYS * 24 * 3600e3);
+  const link = `${env.appUrl}/reset-password?token=${token}`;
+  return sendMail({ ...accountCreatedTemplate(user.name, link, SET_PASSWORD_TTL_DAYS), to: user.email, template: "account_created", userId: user.id });
 }
 
 /**

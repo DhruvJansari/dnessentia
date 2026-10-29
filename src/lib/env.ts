@@ -13,7 +13,9 @@ export const env = {
     secure: (process.env.SMTP_SECURE ?? "true") === "true",
     user: process.env.SMTP_USER ?? "",
     pass: process.env.SMTP_PASS ?? "",
-    from: process.env.MAIL_FROM ?? "DN Essentia <support@dnessentia.com>",
+    from: process.env.MAIL_FROM ?? "DN Essentia <noreply@dnessentia.com>",
+    // Customers replying to a noreply sender reach support instead.
+    replyTo: process.env.MAIL_REPLY_TO ?? "info@dnessentia.com",
   },
 
   razorpay: {

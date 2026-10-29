@@ -21,6 +21,7 @@ export function RetryPayment({ orderNumber, accessKey, amount }: { orderNumber: 
       const res = await retryPaymentAction({ orderNumber, key: accessKey });
       if (!res.ok) {
         setError(res.error);
+        if (res.paid) router.refresh();
         return;
       }
       const outcome = await openRazorpay(res.razorpay, (reason) => void paymentFailedAction({ orderNumber, key: accessKey, reason }));

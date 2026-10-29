@@ -11,7 +11,7 @@ import {
   orderDeliveredTemplate,
   orderShippedTemplate,
 } from "../mail/templates";
-import { createRazorpayOrder, refundPayment } from "../razorpay";
+import { createRazorpayOrder, fetchOrderPayments, refundPayment } from "../razorpay";
 import { getSettings } from "../settings";
 import {
   assignAwb,
@@ -243,6 +243,30 @@ export async function markOrderPaid(
   }
   await confirmOrder(orderId, actor, "Order confirmed after successful payment");
   return true;
+}
+
+/**
+ * Asks Razorpay directly whether any payment attempt on this order was captured, and confirms the order if so.
+ * Covers customers who pay but close the tab before the browser confirms, with or without the webhook.
+ */
+export async function reconcileRazorpayPayment(order: OrderRow, actor: Actor) {
+  if (order.paymentMethod !== "razorpay" || order.paymentStatus === "paid" || !integrations.razorpay()) return false;
+  const attempts = await db
+    .select({ providerOrderId: payments.providerOrderId })
+    .from(payments)
+    .where(and(eq(payments.orderId, order.id), eq(payments.provider, "razorpay")));
+  const rzpOrderIds = [...new Set([order.razorpayOrderId, ...attempts.map((a) => a.providerOrderId)].filter((id): id is string => Boolean(id)))];
+  for (const rzpOrderId of rzpOrderIds) {
+    const captured = (await fetchOrderPayments(rzpOrderId)).find((p) => p.status === "captured");
+    if (captured) {
+      return markOrderPaid(
+        order.id,
+        { razorpayOrderId: rzpOrderId, razorpayPaymentId: captured.id, method: captured.method, raw: captured as unknown as Record<string, unknown> },
+        actor,
+      );
+    }
+  }
+  return false;
 }
 
 export async function markPaymentFailed(orderId: number, reason: string, actor: Actor) {

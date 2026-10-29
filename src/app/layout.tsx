@@ -37,6 +37,7 @@ export const metadata: Metadata = {
     images: ["/images/brand/hero.png"],
   },
   verification: process.env.NEXT_PUBLIC_GSC_VERIFICATION ? { google: process.env.NEXT_PUBLIC_GSC_VERIFICATION } : undefined,
+  robots: site.indexable ? undefined : { index: false, follow: false },
 };
 
 export const viewport: Viewport = {

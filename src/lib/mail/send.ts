@@ -42,6 +42,7 @@ export async function sendMail(input: MailInput): Promise<"sent" | "failed" | "s
     try {
       const info = await getTransport().sendMail({
         from: env.smtp.from,
+        replyTo: env.smtp.replyTo || undefined,
         to: input.to,
         subject: input.subject,
         html: input.html,

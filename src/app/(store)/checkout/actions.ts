@@ -5,18 +5,18 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { addresses, db, orders } from "@/db";
 import { orderEvent } from "@/lib/audit";
-import { createCustomer, findUserByEmail, sendVerificationEmail } from "@/lib/auth/accounts";
+import { createCustomer, findUserByEmail, sendSetPasswordEmail } from "@/lib/auth/accounts";
 import { createSession, getSessionUser, isStaff } from "@/lib/auth/session";
 import { env, integrations } from "@/lib/env";
 import { isValidOrderKey, orderAccessKey } from "@/lib/orders/access";
 import { quoteCart, type CartLineInput, type GiftOption, type ShippingSource } from "@/lib/orders/pricing";
-import { createOrder, errorText, markOrderPaid, startRazorpayPayment, type OrderRow } from "@/lib/orders/service";
+import { createOrder, errorText, markOrderPaid, reconcileRazorpayPayment, startRazorpayPayment, type OrderRow } from "@/lib/orders/service";
 import { fetchPayment, verifyCheckoutSignature } from "@/lib/razorpay";
 import { checkServiceability } from "@/lib/shiprocket";
 import { rateLimit } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request";
 import { getSettings } from "@/lib/settings";
-import { addressSchema, emailField, fieldErrors, passwordField, type FieldErrors } from "@/lib/validation";
+import { addressSchema, emailField, fieldErrors, type FieldErrors } from "@/lib/validation";
 
 const lineSchema = z.object({
   variantId: z.number().int().positive(),
@@ -105,19 +105,12 @@ const checkoutSchema = z
     lastName: z.string().trim().min(1, "Enter your last name").max(60),
     address: addressSchema.omit({ name: true }),
     createAccount: z.boolean().default(false),
-    password: z.string().optional(),
     saveAddress: z.boolean().default(false),
     note: z.string().trim().max(500).optional(),
     couponCode: z.string().trim().max(40).optional(),
     giftVariantId: z.number().int().positive().nullable().optional(),
     paymentMethod: paymentMethodSchema,
     lines: linesSchema,
-  })
-  .superRefine((d, ctx) => {
-    if (d.createAccount) {
-      const r = passwordField.safeParse(d.password ?? "");
-      if (!r.success) ctx.addIssue({ code: "custom", path: ["password"], message: r.error.issues[0].message });
-    }
   });
 
 export type CheckoutPayload = z.input<typeof checkoutSchema>;
@@ -173,9 +166,10 @@ async function placeOrder(payload: CheckoutPayload): Promise<PlaceOrderResult> {
         fieldErrors: { email: "An account with this email already exists. Log in, or untick “Create an account”." },
       };
     }
-    userId = await createCustomer({ email: data.email, name: customerName, phone: data.address.phone, password: data.password! });
+    // No password at checkout: a random one is set and the customer gets a link to choose their own.
+    userId = await createCustomer({ email: data.email, name: customerName, phone: data.address.phone });
     await createSession(userId);
-    await sendVerificationEmail({ id: userId, email: data.email, name: customerName });
+    await sendSetPasswordEmail({ id: userId, email: data.email, name: customerName });
   }
 
   if (userId && data.saveAddress) {
@@ -274,7 +268,7 @@ export async function paymentFailedAction(input: { orderNumber: string; key: str
   });
 }
 
-export async function retryPaymentAction(input: { orderNumber: string; key: string }): Promise<{ ok: true; razorpay: RazorpayPayload } | { ok: false; error: string }> {
+export async function retryPaymentAction(input: { orderNumber: string; key: string }): Promise<{ ok: true; razorpay: RazorpayPayload } | { ok: false; error: string; paid?: true }> {
   const order = await authorisedOrder(input.orderNumber, input.key);
   if (!order) return { ok: false, error: "Order not found." };
   if (order.paymentMethod !== "razorpay" || order.paymentStatus === "paid" || order.status !== "pending") {
@@ -282,6 +276,10 @@ export async function retryPaymentAction(input: { orderNumber: string; key: stri
   }
   if (!integrations.razorpay()) return { ok: false, error: "Online payment isn't set up yet." };
   try {
+    // A payment may have gone through on an earlier attempt (tab closed before confirming). Never charge twice.
+    if (await reconcileRazorpayPayment(order, { type: "customer", id: order.userId })) {
+      return { ok: false, paid: true, error: "We've already received your payment for this order." };
+    }
     const rzp = await startRazorpayPayment(order);
     return { ok: true, razorpay: razorpayPayload(order, rzp.id, orderAccessKey(order.orderNumber)) };
   } catch (err) {

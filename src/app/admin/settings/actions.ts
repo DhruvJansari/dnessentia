@@ -94,8 +94,16 @@ export async function testEmailAction(): Promise<{ ok: boolean; message: string 
 export async function runMaintenanceAction() {
   const actor = await requireAdmin();
   const r = await runMaintenance();
-  await audit({ actor, action: "maintenance.run", entityType: "settings", summary: `Ran maintenance: ${r.reminded} reminders, ${r.expired} expired` });
-  return { ok: r.errors.length === 0, message: `Sent ${r.reminded} payment reminder(s), cancelled ${r.expired} unpaid order(s).${r.errors.length ? ` Errors: ${r.errors.join("; ")}` : ""}` };
+  await audit({
+    actor,
+    action: "maintenance.run",
+    entityType: "settings",
+    summary: `Ran maintenance: ${r.confirmed} payments confirmed, ${r.reminded} reminders, ${r.expired} expired, ${r.tracked} tracked`,
+  });
+  return {
+    ok: r.errors.length === 0,
+    message: `Confirmed ${r.confirmed} paid order(s), sent ${r.reminded} payment reminder(s), cancelled ${r.expired} unpaid order(s), checked tracking for ${r.tracked} shipped order(s).${r.errors.length ? ` Errors: ${r.errors.join("; ")}` : ""}`,
+  };
 }
 
 export async function testShiprocketAction() {

@@ -150,7 +150,10 @@ async function Settings() {
                 <p className="font-medium">Razorpay</p>
                 <Status ok={integrations.razorpay()} label={integrations.razorpay() ? (integrations.razorpayTestMode() ? "Test mode" : "Live") : "Not configured"} />
               </div>
-              <p className="mt-1 text-stone-500">Webhook URL (events: payment.captured, payment.failed, order.paid):</p>
+              <p className="mt-1 text-stone-500">
+                Webhook URL, optional (events: payment.captured, payment.failed, order.paid). Without it, paid orders are still
+                confirmed: the store checks Razorpay every 15 minutes.
+              </p>
               <div className="mt-2">
                 <CopyField value={`${env.appUrl}/api/webhooks/razorpay`} />
               </div>
@@ -163,7 +166,12 @@ async function Settings() {
                 <p className="font-medium">Shiprocket</p>
                 <Status ok={integrations.shiprocket()} label={integrations.shiprocket() ? `Pickup: ${env.shiprocket.pickupLocation}` : "Not configured"} />
               </div>
-              <p className="mt-1 text-stone-500">Tracking webhook URL (Settings → API → Webhooks):</p>
+              <p className="mt-1 text-stone-500">
+                Tracking webhook URL, optional (Settings → API → Webhooks). Without it, courier status is pulled every 15 minutes.
+              </p>
+              {env.shiprocket.testOnly && (
+                <p className="mt-2 text-[12px] text-amber-700">Test-only mode is on (SHIPROCKET_TEST_ONLY): no courier or pickup is booked.</p>
+              )}
               <div className="mt-2">
                 <CopyField value={`${env.appUrl}/api/webhooks/shipping-updates`} />
               </div>

@@ -14,7 +14,7 @@ export default function TermsPage() {
       title="Terms & Conditions"
       eyebrow="Legal"
       updated="October 2026"
-      intro="These terms apply to every purchase on dnessentia.com. By placing an order you agree to them."
+      intro="These terms apply to every purchase on this website. By placing an order you agree to them."
       sections={[
         {
           heading: "About us",

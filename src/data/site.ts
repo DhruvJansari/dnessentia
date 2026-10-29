@@ -1,13 +1,16 @@
 export const site = {
   name: "DN Essentia",
-  url: "https://dnessentia.com",
+  // Public origin for canonical URLs, sitemap and structured data (server-side). Follows APP_URL.
+  url: (process.env.APP_URL || "https://dnessentia.com").replace(/\/$/, ""),
+  // Only the real domain is indexed. Test domains (dnessentia.in, localhost) are hidden from search engines.
+  indexable: (process.env.APP_URL || "https://dnessentia.com").replace(/\/$/, "") === "https://dnessentia.com",
   tagline: "Premium alcohol-free attars",
   description:
     "Premium alcohol-free attars made from 100% concentrated fragrance oils. Long-lasting, skin-friendly perfume oils for men and women.",
   freeShippingThreshold: 299,
   whatsapp: "919274700645",
   whatsappDisplay: "+91 92747 00645",
-  email: "support@dnessentia.com",
+  email: "info@dnessentia.com",
   instagram: "https://www.instagram.com/dnessentia_official/",
   copyrightYear: 2026,
 };

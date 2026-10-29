@@ -22,7 +22,7 @@ export const defaultSettings = {
     packageHeightCm: 6,
   },
   notifications: {
-    adminEmail: "support@dnessentia.com",
+    adminEmail: "nevil2484@gmail.com",
     notifyOnNewOrder: true,
   },
   business: {
@@ -52,7 +52,7 @@ export const defaultSettings = {
   },
   store: {
     name: "DN Essentia",
-    supportEmail: "support@dnessentia.com",
+    supportEmail: "info@dnessentia.com",
     supportPhone: "+91 92747 00645",
     lowStockThreshold: 10,
   },

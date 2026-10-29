@@ -77,7 +77,6 @@ export function CheckoutForm({ user, savedAddresses, codEnabled, codFee, razorpa
       : { ...emptyAddress, phone: user?.phone ?? "" },
   );
   const [createAccount, setCreateAccount] = useState(false);
-  const [password, setPassword] = useState("");
   const [saveAddress, setSaveAddress] = useState(!defaultAddress);
   const [paymentMethod, setPaymentMethod] = useState<"razorpay" | "cod">(razorpayReady || !codEnabled ? "razorpay" : "cod");
   const [showNote, setShowNote] = useState(false);
@@ -170,7 +169,6 @@ export function CheckoutForm({ user, savedAddresses, codEnabled, codFee, razorpa
         lastName,
         address,
         createAccount: !user && createAccount,
-        password: createAccount ? password : undefined,
         saveAddress: (Boolean(user) || createAccount) && savedId === "new" && saveAddress,
         note: showNote ? note : undefined,
         // Only send a coupon the server has already accepted; a rejected one just shows its message.
@@ -285,23 +283,11 @@ export function CheckoutForm({ user, savedAddresses, codEnabled, codFee, razorpa
                 />
                 <span>
                   <span className="block font-medium">Create an account with DN Essentia</span>
-                  <span className="block text-sm text-muted">Track this and future orders, save addresses and check out faster.</span>
+                  <span className="block text-sm text-muted">
+                    Track this and future orders, save addresses and check out faster. We&apos;ll email you a link to set your password.
+                  </span>
                 </span>
               </label>
-              {createAccount && (
-                <Field
-                  label="Choose a password"
-                  name="password"
-                  type="password"
-                  autoComplete="new-password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  error={errors.password}
-                  hint="At least 8 characters"
-                  className="animate-fade-up"
-                />
-              )}
             </div>
           )}
         </Step>

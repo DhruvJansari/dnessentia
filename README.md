@@ -21,10 +21,10 @@ Log in at `/login` with `ADMIN_EMAIL` / `ADMIN_PASSWORD` from `.env.local`, then
 | Variable | What it's for |
 | --- | --- |
 | `DATABASE_URL` | `mysql://user:pass@127.0.0.1:3306/dnessentia`. Use a dedicated user in production (`scripts/setup-db.sql`). |
-| `APP_URL` | Public URL, used in emails and webhook links. `https://dnessentia.com` in production. |
+| `APP_URL` | Public URL, used in emails, sitemap, canonical links and webhook links. `https://dnessentia.in` while testing, `https://dnessentia.com` when live. Any other domain than dnessentia.com is hidden from search engines. |
 | `APP_SECRET` | Signs guest order-tracking links. Long random string; never change once live. |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | First admin, created by `npm run db:seed`. |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` | Outgoing email. Empty = emails are logged as "skipped" and printed to the console. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`, `MAIL_REPLY_TO` | Outgoing email via Hostinger (`smtp.hostinger.com`, 465, SSL) as noreply@dnessentia.com; replies go to `MAIL_REPLY_TO`. Empty = emails are logged as "skipped". Admin alerts go to Admin → Settings → Notifications. |
 | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` | Use `rzp_test_…` keys while testing, `rzp_live_…` to go live. |
 | `RAZORPAY_WEBHOOK_SECRET` | Secret you set on the Razorpay webhook. |
 | `SHIPROCKET_EMAIL`, `SHIPROCKET_PASSWORD` | A Shiprocket **API user** (Settings → API → Create API User), not your main login. |
@@ -41,11 +41,11 @@ Admin → Settings shows which integrations are configured and has "Send test em
 
 ## How orders flow
 
-1. **Checkout** (`/checkout`) follows the WooCommerce flow: contact → shipping address → payment → note → Place order. Guests can tick **Create an account** to set a password; logged-in customers get saved addresses.
+1. **Checkout** (`/checkout`) follows the WooCommerce flow: contact → shipping address → payment → note → Place order. Guests can tick **Create an account**: no password is asked, the account is created and they are emailed a link to set their password (valid 7 days; Forgot password works any time after); logged-in customers get saved addresses.
 2. Prices, stock, combo picks and coupons are **re-checked on the server**; the browser's prices are never trusted.
-3. **Razorpay**: the order is saved as *pending/unpaid*, Razorpay Checkout opens, and the payment signature is verified server-side. The **webhook** confirms the payment even if the customer closes the tab. Unpaid orders show a "Pay now" button on their order page.
+3. **Razorpay**: the order is saved as *pending/unpaid*, Razorpay Checkout opens, and the payment signature is verified server-side. If the customer closes the tab after paying, the order is still confirmed: by the webhook when it is set up, and otherwise by the 15-minute payment check (and before any "Pay now" retry, so nobody pays twice). Unpaid orders show a "Pay now" button on their order page.
 4. On confirmation: stock is deducted, the coupon use is counted, the customer gets a confirmation email, and the admin gets a new-order email.
-5. **Shipping**: Admin → order → **Create shipment** creates the Shiprocket order, assigns a courier + AWB, requests pickup, marks the order *shipped* and emails tracking. Turn on *auto-create* in Settings to skip the click. The tracking webhook (or **Sync tracking**) moves it to *delivered*.
+5. **Shipping**: Admin → order → **Create shipment** creates the Shiprocket order, assigns a courier + AWB, requests pickup, marks the order *shipped* and emails tracking. Turn on *auto-create* in Settings to skip the click. Courier status is pulled every 15 minutes (or instantly by the tracking webhook, or **Sync tracking**), which moves it to *delivered*.
 6. Customers track orders in **My account**, or as guests via the emailed link or `/track` (order number + email). Verifying the email attaches earlier guest orders to the account.
 
 COD exists but is **off by default** (the current site is Razorpay-only). Toggle it in Admin → Settings → Payments.
@@ -59,7 +59,9 @@ COD exists but is **off by default** (the current site is Razorpay-only). Toggle
 
 ### Scheduled job
 
-Add this to the server's crontab so reminders and expiry run every 15 minutes:
+Every 15 minutes the production server (`npm start`) runs `/api/cron/maintenance` by itself (`src/instrumentation.ts`, needs `CRON_SECRET`). It confirms paid orders that the browser never confirmed (asks Razorpay directly), sends unpaid-order reminders, cancels expired unpaid orders and pulls courier tracking from Shiprocket. No crontab or webhook is required.
+
+If you prefer an external crontab, set `INTERNAL_CRON=false` and add:
 
 ```
 */15 * * * * curl -s -X POST -H "Authorization: Bearer YOUR_CRON_SECRET" https://dnessentia.com/api/cron/maintenance
@@ -71,7 +73,9 @@ Admin → Settings → Policies also has a **Run now** button.
 
 Product reviews (verified buyers publish instantly, others are moderated), instant search (header icon or the `/` key), wishlist (saved to the account when logged in), recently viewed, 1 ml sample suggestions in the bag, FREEGIFT adds the chosen sample as a ₹0 line, GA4 e-commerce events (view_item, add_to_cart, begin_checkout, purchase, search, add_to_wishlist), product + breadcrumb + organization structured data, Contact page with inbox, Terms & Conditions.
 
-## Webhooks to configure
+## Webhooks (optional, add later)
+
+The store works without them (see Scheduled job). They only make payment and tracking updates instant.
 
 | Service | URL | Events / notes |
 | --- | --- | --- |
